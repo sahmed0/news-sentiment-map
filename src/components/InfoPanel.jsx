@@ -58,7 +58,7 @@ export function InfoPanel({ open, onClose }) {
           {/* Header */}
           <div className="flex items-center justify-between px-5 pt-3 sm:pt-5 pb-3 border-b border-fg/8 shrink-0">
             <div>
-              <p className="text-xs uppercase tracking-widest  mb-0.5">
+              <p className="text-xs font-semibold uppercase tracking-widest  mb-0.5">
                 About
               </p>
               <h2 className="text-lg sm:text-2xl font-black tracking-tight truncate"
@@ -79,11 +79,11 @@ export function InfoPanel({ open, onClose }) {
           {/* Body */}
           <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6 text-sm leading-relaxed text-fg/80 light:text-black/75">
             <section>
-              <h3 className="text-xs uppercase tracking-widest mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-widest mb-2">
                 Data pipeline
               </h3>
               <p>
-                Up to 5 of the most popular articles are fetched per country from{" "}
+                Up to 5 of the most popular news headlines are fetched per country from{" "}
                 <a
                   href="https://newsdata.io"
                   target="_blank"
@@ -101,12 +101,12 @@ export function InfoPanel({ open, onClose }) {
                 >
                   Microsoft Azure Translator
                 </a>
-                {" "} before scoring. Scoring is conducted using a fine-tuned multilingual sentiment model. Results are fetched around 10:00 PM local time for each country and cached in Redis - each country's data reflects roughly its previous morning's news cycle due to NewsData.io's 12 hour lag.
+                {" "} before scoring. Scoring is done by a fine-tuned multilingual sentiment model. Results are fetched around 10:00 PM local time for each country and cached in Redis. Every time the user opens/refreshes the website, an API call is made to Vercel to receive the cached results.
               </p>
             </section>
 
             <section>
-              <h3 className="text-xs uppercase tracking-widest mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-widest mb-2">
                 Sentiment analysis
               </h3>
               <p>
@@ -124,15 +124,18 @@ export function InfoPanel({ open, onClose }) {
             </section>
 
             <section>
-              <h3 className="text-xs uppercase tracking-widest mb-2">
-                Why some countries are missing
+              <h3 className="text-xs font-semibold uppercase tracking-widest mb-2">
+                Coverage
               </h3>
               <p>
-                Coverage depends on the free-tier request limits of the NewsData.io Latest News API, Hugging Face Inference API, and Microsoft Azure Translator API. Therefore, small island nations, microstates, and countries with limited online press presence are left uncoloured on the map. Some smaller countries that are currently covered may be subject to removal if API rate limits are exceeded.
+                Coverage depends on the free-tier rate limits of the NewsData.io API, Hugging Face Inference API, and Microsoft Azure Translator API. Therefore, small island nations, microstates, and countries with very limited online press presence are not covered.
+                <br></br>
+                Furthermore, the countries are split into high & low priority groups based on their global media presence. High priority countries are updated every day, while low priority countries are updated every 3 days.
+                Some smaller countries that are currently covered may be removed if rate limits are exceeded.
               </p>
             </section>
             <section>
-              <h3 className="text-xs uppercase tracking-widest mb-2">Disclaimer</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-widest mb-2">Disclaimer</h3>
               <p>
                 The purpose of this project is to demonstrate the application of natural language processing techniques for sentiment analysis and provide an interactive visualisation of media attitudes around the globe.
                 <br></br>
@@ -141,7 +144,7 @@ export function InfoPanel({ open, onClose }) {
             </section>
           </div>
           {/* Footer */}
-            <div className="flex items-center justify-evenly p-2 shrink-0">
+            <div className="flex items-center justify-evenly p-4 shrink-0">
               <a
               href="https://sajidahmed.co.uk"
               target="_blank"

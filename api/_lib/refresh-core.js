@@ -23,16 +23,16 @@ const CREDIT_DAY_KEY = (dayId) => `sentiment:credits:day:${dayId}`;
 // scored sequentially); keep it small enough that a tick can never time out. The
 // ~105 supported countries are still covered daily via the done-set + staleness
 // backfill, well inside MAX_PER_DAY.
-const MAX_PER_WINDOW = 12;
-const MAX_PER_DAY = 133;
-const LOW_PRIORITY_DAYS = 3; // countries only in LOW_PRIORITY_COUNTRIES refresh at most every 3 days
+export const MAX_PER_WINDOW = 9;
+const MAX_PER_DAY = 87;
+export const LOW_PRIORITY_DAYS = 3; // countries only in LOW_PRIORITY_COUNTRIES refresh at most every 3 days
 const TARGET_LOCAL_HOUR = 22; // refresh each country near 10 pm local time
 const DONE_TTL = 26 * 60 * 60; // 26 h - outlives a NewsData day so the set is whole-day
 const WINDOW_MS = 15 * 60 * 1000;
-const DAY_MS = 24 * 60 * 60 * 1000;
+export const DAY_MS = 24 * 60 * 60 * 1000;
 // NewsData resets its daily quota at 1am UTC, not midnight. Subtract 59 min so our
 // day boundary changes a minute before theirs (epoch / DAY_MS flips at midnight of the shifted clock).
-const NEWSDATA_DAY_OFFSET_MS = 59 * 60 * 1000;
+export const NEWSDATA_DAY_OFFSET_MS = 59 * 60 * 1000;
 
 const dayId = (now) => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
 const windowId = (now) => Math.floor(now.getTime() / WINDOW_MS);

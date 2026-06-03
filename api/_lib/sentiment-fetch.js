@@ -1,5 +1,6 @@
 // Shared fetch logic used by both the on-demand handler and the cron pre-warmer
 
+import { LucideSeparatorHorizontal } from "lucide-react";
 import { now, since, log, debug, DEBUG } from "./logger.js";
 
 // utcOffset = standard-time offset (hours) of the country's primary population
@@ -56,7 +57,9 @@ export const HIGH_PRIORITY_COUNTRIES = [
   { code: "th", name: "Thailand", utcOffset: 7 },
   { code: "my", name: "Malaysia", utcOffset: 8 },
   { code: "dk", name: "Denmark", utcOffset: 1 },
-  { code: "no", name: "Norway", utcOffset: 1 }
+  { code: "no", name: "Norway", utcOffset: 1 },
+  { code: "ae", name: "United Arab Emirates", utcOffset: 4 },
+  { code: "qa", name: "Qatar", utcOffset: 3 },
 ];
 
 export const LOW_PRIORITY_COUNTRIES = [
@@ -142,7 +145,27 @@ export const LOW_PRIORITY_COUNTRIES = [
   { code: "hn", name: "Honduras", utcOffset: -6 },
   { code: "ni", name: "Nicaragua", utcOffset: -6 },
   { code: "cr", name: "Costa Rica", utcOffset: -6 },
-  { code: "pa", name: "Panama", utcOffset: -5 }
+  { code: "pa", name: "Panama", utcOffset: -5 },
+  { code: "is", name: "Iceland", utcOffset: 0 },
+  { code: "tn", name: "Tunisia", utcOffset: 1 },
+  { code: "bt", name: "Bhutan", utcOffset: 6 },
+  { code: "kw", name: "Kuwait", utcOffset: 3 },
+  { code: "bh", name: "Bahrain", utcOffset: 3 },
+  { code: "er", name: "Eritrea", utcOffset: 3 },
+  { code: "dj", name: "Djibouti", utcOffset: 3 },
+  { code: "rw", name: "Rwanda", utcOffset: 2 },
+  { code: "bi", name: "Burundi", utcOffset: 2 },
+  { code: "tg", name: "Togo", utcOffset: 0 },
+  { code: "bj", name: "Benin", utcOffset: 0 },
+  { code: "lr", name: "Liberia", utcOffset: 0 },
+  { code: "sl", name: "Sierra Leone", utcOffset: 0 },
+  { code: "gm", name: "Gambia", utcOffset: 0 },
+  { code: "ls", name: "Lesotho", utcOffset: 2 },
+  { code: "gq", name: "Equatorial Guinea", utcOffset: 1 },
+  { code: "bz", name: "Belize", utcOffset: -6 },
+  { code: "sv", name: "El Salvador", utcOffset: -6 },
+  { code: "do", name: "Dominican Republic", utcOffset: -4 },
+  { code: "ht", name: "Haiti", utcOffset: -5 }
 ];
 
 // All supported countries, high tier first. Derived so existing consumers

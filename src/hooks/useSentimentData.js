@@ -9,9 +9,6 @@ export function useSentimentData() {
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [fromCache, setFromCache] = useState(false);
-  // Age of the oldest country's data - the true "as of" time of the map under
-  // the staggered rolling refresh (server-reported, unlike lastUpdated).
-  const [oldestFetchedAt, setOldestFetchedAt] = useState(null);
 
   // Named function expression so the 503 retry can recurse via its own internal
   // name (`attempt`) instead of the outer `fetchData` binding, which isn't yet
@@ -31,7 +28,6 @@ export function useSentimentData() {
       setData(json.data || []);
       setFromCache(json.cached ?? false);
       setLastUpdated(new Date());
-      setOldestFetchedAt(json.oldestFetchedAt ? new Date(json.oldestFetchedAt) : null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -51,5 +47,5 @@ export function useSentimentData() {
     return acc;
   }, {});
 
-  return { data, byCode, loading, error, lastUpdated, fromCache, oldestFetchedAt, refetch: fetchData };
+  return { data, byCode, loading, error, lastUpdated, fromCache, refetch: fetchData };
 }

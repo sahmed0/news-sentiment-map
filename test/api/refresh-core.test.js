@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   AGG_KEY,
+  MAX_PER_WINDOW,
+  DAY_MS,
+  NEWSDATA_DAY_OFFSET_MS,
+  LOW_PRIORITY_DAYS,
   selectDueCountries,
   reserveCredits,
   persistCountries,
@@ -9,10 +13,6 @@ import {
 import { COUNTRIES } from "../../api/_lib/sentiment-fetch.js";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
 
-// Mirrors refresh-core's internal dayId so tests can seed the right done-key /
-// freshness timestamps for a chosen `now`. (Kept in sync with the module.)
-const DAY_MS = 24 * 60 * 60 * 1000;
-const NEWSDATA_DAY_OFFSET_MS = 59 * 60 * 1000;
 const dayIdOf = (now) => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
 
 const NOW = new Date("2024-06-01T12:30:00Z"); // hour 12 UTC — chosen so the tested countries fall to backfill, not tz-due
@@ -48,8 +48,8 @@ describe("selectDueCountries", () => {
   it("returns an empty subset once the credit budget is exhausted", async () => {
     const redis = createFakeRedis();
     const first = await selectDueCountries(redis, NOW);
-    // Spend the whole 15-min window budget (MAX_PER_WINDOW = 12).
-    await reserveCredits(redis, 12, { dayId: first.dayId, windowId: first.windowId });
+    // Spend the whole 15-min window budget.
+    await reserveCredits(redis, MAX_PER_WINDOW, { dayId: first.dayId, windowId: first.windowId });
 
     const { subset, diag } = await selectDueCountries(redis, NOW);
     expect(diag.budget).toBe(0);
@@ -84,7 +84,7 @@ describe("selectDueCountries", () => {
     // ma last fetched 4 days ago → cadence elapsed → eligible again.
     const stale = createFakeRedis({
       sets: { [doneKey]: done },
-      zsets: { "sentiment:freshness": { ma: NOW.getTime() - 4 * DAY_MS } },
+      zsets: { "sentiment:freshness": { ma: NOW.getTime() - (LOW_PRIORITY_DAYS + 1) * DAY_MS } },
     });
     const b = await selectDueCountries(stale, NOW);
     expect(b.subset.map((c) => c.code).sort()).toEqual(["ma", "us"]);

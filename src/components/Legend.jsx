@@ -8,7 +8,7 @@ const GRADIENT_STOPS = [
   { pct: "100%", color: "#00ff00" },
 ];
 
-export function Legend({ data, lastUpdated, fromCache, oldestFetchedAt }) {
+export function Legend({ data, lastUpdated, fromCache }) {
   const isMobile = useIsMobile();
   // Collapsed by default on phones; expanded by default on desktop (toggleable everywhere).
   const [open, setOpen] = useState(() => !isMobile);
@@ -17,6 +17,12 @@ export function Legend({ data, lastUpdated, fromCache, oldestFetchedAt }) {
   const sorted = [...scored].sort((a, b) => b.score - a.score);
   const top3 = sorted.slice(0, 3);
   const bottom3 = sorted.slice(-3).reverse();
+
+  const newestFetchedAt = data.reduce((best, c) => {
+    if (!c.fetchedAt) return best;
+    const d = new Date(c.fetchedAt);
+    return !best || d > best ? d : best;
+  }, null);
 
   return (
     <div className="absolute top-2 left-3 sm:top-auto sm:bottom-2 sm:left-2 z-10">
@@ -92,12 +98,10 @@ export function Legend({ data, lastUpdated, fromCache, oldestFetchedAt }) {
           </div>
         )}
 
-        {/* Data freshness. Countries refresh on a rolling ~10pm-local schedule, so
-            oldestFetchedAt is the true "as of" age of the map; fall back to the
-            client fetch time if the server didn't report it. */}
-        {oldestFetchedAt ? (
+        {/* Data freshness — derived from the most recently fetched country in data. */}
+        {newestFetchedAt ? (
           <p className="opacity-60 text-[11px]">
-            News as of {oldestFetchedAt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+            News as of {newestFetchedAt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
           </p>
         ) : (
           lastUpdated && (

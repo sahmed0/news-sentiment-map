@@ -11,7 +11,7 @@ import { Sun, Moon, Info } from 'lucide-react';
 import { InfoPanel } from "./components/InfoPanel";
 
 export default function App() {
-  const { byCode, data, loading, error, lastUpdated, fromCache, oldestFetchedAt } =
+  const { byCode, data, loading, error, lastUpdated, fromCache } =
     useSentimentData();
   const { theme, toggle: toggleTheme } = useTheme();
   const [selectedCountry, setSelectedCountry] = useState(null);
@@ -162,7 +162,6 @@ export default function App() {
           data={data}
           lastUpdated={lastUpdated}
           fromCache={fromCache}
-          oldestFetchedAt={oldestFetchedAt}
         />
       )}
 

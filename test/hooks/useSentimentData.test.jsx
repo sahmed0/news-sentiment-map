@@ -18,12 +18,11 @@ afterEach(() => {
 });
 
 describe("useSentimentData", () => {
-  it("loads data, exposes fromCache/oldestFetchedAt, and upcases byCode keys", async () => {
+  it("loads data, exposes fromCache, and upcases byCode keys", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       res(200, {
         data: [{ code: "us", name: "US", score: 0.2 }],
         cached: true,
-        oldestFetchedAt: "2024-01-01T00:00:00.000Z",
       })
     );
 
@@ -32,7 +31,6 @@ describe("useSentimentData", () => {
 
     expect(result.current.data).toHaveLength(1);
     expect(result.current.fromCache).toBe(true);
-    expect(result.current.oldestFetchedAt).toBeInstanceOf(Date);
     expect(result.current.byCode.US).toMatchObject({ code: "us" }); // lowercase API code → uppercase key
     expect(result.current.error).toBeNull();
   });

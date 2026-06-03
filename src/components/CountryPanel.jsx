@@ -86,6 +86,7 @@ function Headlines({ articles }) {
                 </p>
               )}
               <p className="text-xs text-fg/50 light:text-black/70 mt-0.5">
+              Cached on {" "}
                 {article.publishedAt
                   ? new Date(article.publishedAt).toLocaleDateString(undefined, {
                       month: "short",

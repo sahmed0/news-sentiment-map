@@ -57,10 +57,10 @@ describe("GET /api/sentiment", () => {
     expect(res.body.error).toMatch(/warming/i);
   });
 
-  it("serves the aggregate with cached + the oldest fetchedAt across countries", async () => {
+  it("serves the aggregate with cached flag", async () => {
     const data = [
       { code: "us", name: "US", score: 0.2, fetchedAt: "2024-01-02T00:00:00.000Z" },
-      { code: "gb", name: "UK", score: -0.1, fetchedAt: "2024-01-01T00:00:00.000Z" }, // oldest
+      { code: "gb", name: "UK", score: -0.1, fetchedAt: "2024-01-01T00:00:00.000Z" },
     ];
     Redis.mockImplementation(function () {
       return createFakeRedis({ store: { "sentiment:world": data } });
@@ -70,7 +70,6 @@ describe("GET /api/sentiment", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.cached).toBe(true);
     expect(res.body.data).toHaveLength(2);
-    expect(res.body.oldestFetchedAt).toBe("2024-01-01T00:00:00.000Z");
     expect(res.headers["Access-Control-Allow-Origin"]).toBe("*");
   });
 });

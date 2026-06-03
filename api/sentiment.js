@@ -25,14 +25,5 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: "Data warming up, retry shortly" });
   }
 
-  // Under staggered refresh each country carries its own fetchedAt; surface the
-  // oldest so the UI can show the true age of the map's data.
-  let oldestFetchedAt = null;
-  for (const c of data) {
-    if (c.fetchedAt && (!oldestFetchedAt || c.fetchedAt < oldestFetchedAt)) {
-      oldestFetchedAt = c.fetchedAt;
-    }
-  }
-
-  return res.status(200).json({ data, cached: true, oldestFetchedAt });
+  return res.status(200).json({ data, cached: true });
 }
