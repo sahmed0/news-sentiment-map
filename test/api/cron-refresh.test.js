@@ -1,0 +1,142 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { createFakeRedis } from "../helpers/fakeRedis.js";
+
+// Isolate the cron handler from Redis and the fetch/select/persist pipeline so we
+// test only its orchestration: auth, env guard, lock, branch selection, lock release.
+vi.mock("@upstash/redis", () => ({ Redis: vi.fn() }));
+vi.mock("../../api/_lib/sentiment-fetch.js", () => ({ fetchCountries: vi.fn() }));
+vi.mock("../../api/_lib/refresh-core.js", () => ({
+  selectDueCountries: vi.fn(),
+  reserveCredits: vi.fn(),
+  persistCountries: vi.fn(),
+  rebuildAggregate: vi.fn(),
+}));
+
+import handler from "../../api/cron/refresh.js";
+import { Redis } from "@upstash/redis";
+import { fetchCountries } from "../../api/_lib/sentiment-fetch.js";
+import {
+  selectDueCountries,
+  reserveCredits,
+  persistCountries,
+  rebuildAggregate,
+} from "../../api/_lib/refresh-core.js";
+
+const LOCK_KEY = "sentiment:refresh:lock";
+
+function mockRes() {
+  return {
+    statusCode: null,
+    body: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(obj) {
+      this.body = obj;
+      return this;
+    },
+  };
+}
+const authedReq = () => ({ headers: { authorization: "Bearer secret" } });
+
+beforeEach(() => {
+  vi.clearAllMocks(); // reset module-mock call history between tests
+  vi.stubEnv("CRON_SECRET", "secret");
+  vi.stubEnv("KV_REST_API_URL", "https://fake");
+  vi.stubEnv("KV_REST_API_TOKEN", "tok");
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  Redis.mockReset();
+});
+
+describe("POST /api/cron/refresh — guards", () => {
+  it("rejects a request without the correct Bearer CRON_SECRET", async () => {
+    const res = mockRes();
+    await handler({ headers: { authorization: "Bearer wrong" } }, res);
+    expect(res.statusCode).toBe(401);
+    expect(Redis).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when Redis env vars are missing", async () => {
+    vi.stubEnv("KV_REST_API_URL", "");
+    const res = mockRes();
+    await handler(authedReq(), res);
+    expect(res.statusCode).toBe(500);
+  });
+
+  it("exits early when another tick already holds the lock", async () => {
+    Redis.mockImplementation(function () {
+      return createFakeRedis({ store: { [LOCK_KEY]: "1" } });
+    });
+    const res = mockRes();
+    await handler(authedReq(), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ ok: false, reason: "tick already in progress" });
+    expect(selectDueCountries).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/cron/refresh — orchestration", () => {
+  it("runs the full pipeline and releases the lock on success", async () => {
+    const redis = createFakeRedis();
+    Redis.mockImplementation(function () {
+      return redis;
+    });
+
+    const selection = { subset: [{ code: "us" }], dayId: 1, windowId: 2, diag: { budget: 5 } };
+    selectDueCountries.mockResolvedValue(selection);
+    reserveCredits.mockResolvedValue();
+    fetchCountries.mockResolvedValue([{ code: "us", score: 0.3, articles: [] }]);
+    persistCountries.mockResolvedValue(["us"]);
+    rebuildAggregate.mockResolvedValue(1);
+
+    const res = mockRes();
+    await handler(authedReq(), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, refreshed: ["us"], attempted: 1, aggregate: 1 });
+    expect(reserveCredits).toHaveBeenCalledWith(redis, 1, selection);
+    expect(fetchCountries).toHaveBeenCalledWith(selection.subset, expect.any(Object));
+    expect(persistCountries).toHaveBeenCalled();
+    expect(rebuildAggregate).toHaveBeenCalled();
+    // finally → lock released
+    expect(redis._store.has(LOCK_KEY)).toBe(false);
+  });
+
+  it("takes the idle branch (rebuild only) when nothing is due / budget exhausted", async () => {
+    Redis.mockImplementation(function () {
+      return createFakeRedis();
+    });
+    selectDueCountries.mockResolvedValue({ subset: [], dayId: 1, windowId: 2, diag: { budget: 0 } });
+    rebuildAggregate.mockResolvedValue(7);
+
+    const res = mockRes();
+    await handler(authedReq(), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, refreshed: [], aggregate: 7 });
+    expect(res.body.debug.reason).toBe("budget_exhausted");
+    expect(reserveCredits).not.toHaveBeenCalled();
+    expect(fetchCountries).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 and still releases the lock when the tick throws", async () => {
+    const redis = createFakeRedis();
+    Redis.mockImplementation(function () {
+      return redis;
+    });
+    selectDueCountries.mockRejectedValue(new Error("upstream down"));
+
+    const res = mockRes();
+    await handler(authedReq(), res);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toMatchObject({ ok: false, error: "upstream down" });
+    expect(redis._store.has(LOCK_KEY)).toBe(false); // released in finally
+  });
+});

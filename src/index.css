@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@custom-variant light (.theme-light &);
+
+/* Make the `sm`/`md` "large display" layouts require vertical room, not just
+   width. A phone in landscape is wide (>640/768px) but very short, so without
+   the min-height guard it would adopt the desktop layout and crowd the tiny
+   viewport. Tablets/desktops are comfortably taller than 500px, so they're
+   unaffected; only short landscape phones (and unusually short browser windows)
+   fall back to the roomier mobile layout. Keep this height in sync with the
+   `useIsMobile` hook in src/hooks/useMediaQuery.js. */
+@custom-variant sm (@media (min-width: 768px) and (min-height: 500px));
+@custom-variant md (@media (min-width: 1024px) and (min-height: 500px));
+
+/* `fg` color utility (text-fg, bg-fg, border-fg + /opacity) resolves to the
+   theme's foreground RGB, so opacity variants invert correctly between themes. */
+@theme {
+  --color-fg: rgb(var(--fg-rgb));
+}
+
+:root {
+  --bg-rgb: 0 11 35;
+  --fg-rgb: 250 250 249;
+  --panel-rgb: 20 25 40;
+  --map-empty: #222937;
+  --map-dimmed-opacity: 0.20;
+  --c-positive-rgb: 0 255 0;
+  --c-neutral-rgb: 240 200 0;
+  --c-negative-rgb: 255 0 0;
+  color-scheme: dark;
+}
+
+.theme-light {
+  --bg-rgb: 226 248 255;
+  --fg-rgb: 0 0 0;
+  --panel-rgb: 250 250 249;
+  --map-empty: #ffffff;
+  --map-dimmed-opacity: 0.20;
+  --c-positive-rgb: 22 163 74;
+  --c-neutral-rgb: 230 160 32;
+  --c-negative-rgb: 220 38 38;
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background-color: rgb(var(--bg-rgb));
+}
+
+* {
+  scrollbar-width: thin;
+}
+
+body {
+  margin: 0;
+  /* Stop pull-to-refresh / rubber-banding from fighting the map's drag & pinch gestures. */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
