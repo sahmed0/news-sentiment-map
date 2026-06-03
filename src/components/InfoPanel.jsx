@@ -101,7 +101,7 @@ export function InfoPanel({ open, onClose }) {
                 >
                   Microsoft Azure Translator
                 </a>
-                {" "} before scoring. Scoring is done by a fine-tuned multilingual sentiment model. Results are fetched around 10:00 PM local time for each country and cached in Redis. Every time the user opens/refreshes the website, an API call is made to Vercel to receive the cached results.
+                {" "} before scoring. Scoring is done by a fine-tuned multilingual sentiment model. Results are fetched around 10:00 PM local time for each country and cached in Redis. A Vercel serverless function is triggered to fetch the cached results from the Redis database every time the user opens or refreshes the website.
               </p>
             </section>
 
@@ -128,18 +128,18 @@ export function InfoPanel({ open, onClose }) {
                 Coverage
               </h3>
               <p>
-                Coverage depends on the free-tier rate limits of the NewsData.io API, Hugging Face Inference API, and Microsoft Azure Translator API. Therefore, small island nations, microstates, and countries with very limited online press presence are not covered.
+                Coverage is dictated by the rate limits of the NewsData.io, Hugging Face, and Microsoft Azure Translator APIs. Therefore, small island nations, microstates, and countries with very limited online press presence are not covered.
                 <br></br>
-                Furthermore, the countries are split into high & low priority groups based on their global media presence. High priority countries are updated every day, while low priority countries are updated every 3 days.
-                Some smaller countries that are currently covered may be removed if rate limits are exceeded.
+                Additionally, the covered countries are split into high & low priority groups based on their global media presence. High priority countries are updated every day, while low priority countries are updated every 3 days.
+                Some low priority countries that are currently covered may be removed if rate limits become difficult to manage.
               </p>
             </section>
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-widest mb-2">Disclaimer</h3>
               <p>
-                The purpose of this project is to demonstrate the application of natural language processing techniques for sentiment analysis and provide an interactive visualisation of media attitudes around the globe.
+                The purpose of this project is purely to demonstrate the application of natural language processing for sentiment analysis and provide an interactive visualisation of media attitudes around the globe.
                 <br></br>
-                The articles and sentiment scores are derived from NewsData.io and the `cardiffnlp` model, and are not indicative of my personal views.
+                All results are derived from external sources. The featured headlines and sentiment scores are not representative of my personal/political views.
               </p>
             </section>
           </div>
