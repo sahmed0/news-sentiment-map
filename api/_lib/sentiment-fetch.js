@@ -1,6 +1,5 @@
 // Shared fetch logic used by both the on-demand handler and the cron pre-warmer
 
-import { LucideSeparatorHorizontal } from "lucide-react";
 import { now, since, log, debug, DEBUG } from "./logger.js";
 
 // utcOffset = standard-time offset (hours) of the country's primary population
