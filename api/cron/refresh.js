@@ -60,9 +60,15 @@ export default async function handler(req, res) {
     }
 
     // Reserve credits up front so a mid-tick crash can never under-count spend.
-    await reserveCredits(redis, subset.length, selection);
+    // Each provider is charged its own count (see selection.counts).
+    await reserveCredits(redis, selection.counts, selection);
 
-    log("Tick", "refreshing", { n: subset.length, codes: subset.map((c) => c.code).join(",") });
+    log("Tick", "refreshing", {
+      n: subset.length,
+      gnews: selection.counts.gnews,
+      newsdata: selection.counts.newsdata,
+      codes: subset.map((c) => c.code).join(","),
+    });
     const stats = {};
     const results = await fetchCountries(subset, stats);
     const refreshed = await persistCountries(redis, results, selection.dayId);

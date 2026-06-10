@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   AGG_KEY,
   MAX_PER_WINDOW,
+  GNEWS_MAX_PER_DAY,
   DAY_MS,
   NEWSDATA_DAY_OFFSET_MS,
   LOW_PRIORITY_DAYS,
@@ -10,7 +11,7 @@ import {
   persistCountries,
   rebuildAggregate,
 } from "../../api/_lib/refresh-core.js";
-import { COUNTRIES } from "../../api/_lib/sentiment-fetch.js";
+import { COUNTRIES, HIGH_PRIORITY_CODES } from "../../api/_lib/sentiment-fetch.js";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
 
 const dayIdOf = (now) => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
@@ -28,12 +29,16 @@ afterEach(() => {
 });
 
 describe("selectDueCountries", () => {
-  it("clamps the picked count to the NEWSDATA_MAX_COUNTRIES dev cap", async () => {
-    vi.stubEnv("NEWSDATA_MAX_COUNTRIES", "3");
+  it("clamps each provider independently to NEWSDATA_MAX_COUNTRIES so both are represented", async () => {
+    vi.stubEnv("NEWSDATA_MAX_COUNTRIES", "2");
     const redis = createFakeRedis();
-    const { subset, diag } = await selectDueCountries(redis, NOW);
-    expect(diag.budget).toBe(3);
-    expect(subset).toHaveLength(3);
+    const { subset, counts } = await selectDueCountries(redis, NOW);
+    // Each provider is capped at devLimit, not the combined array.
+    expect(counts.gnews).toBeLessThanOrEqual(2);
+    expect(counts.newsdata).toBeLessThanOrEqual(2);
+    expect(counts.gnews).toBeGreaterThan(0);
+    expect(counts.newsdata).toBeGreaterThan(0);
+    expect(subset).toHaveLength(counts.gnews + counts.newsdata);
     subset.forEach((c) => expect(typeof c.code).toBe("string"));
   });
 
@@ -45,15 +50,40 @@ describe("selectDueCountries", () => {
     expect(subset[0].code).toBe("us");
   });
 
-  it("returns an empty subset once the credit budget is exhausted", async () => {
+  it("returns an empty subset once both providers' budgets are exhausted", async () => {
     const redis = createFakeRedis();
     const first = await selectDueCountries(redis, NOW);
-    // Spend the whole 15-min window budget.
-    await reserveCredits(redis, MAX_PER_WINDOW, { dayId: first.dayId, windowId: first.windowId });
+    // Spend NewsData's 15-min window budget and GNews's daily budget.
+    await reserveCredits(
+      redis,
+      { newsdata: MAX_PER_WINDOW, gnews: GNEWS_MAX_PER_DAY },
+      { dayId: first.dayId, windowId: first.windowId }
+    );
 
     const { subset, diag } = await selectDueCountries(redis, NOW);
     expect(diag.budget).toBe(0);
     expect(subset).toHaveLength(0);
+  });
+
+  it("budgets the two providers independently - exhausting GNews still lets NewsData run", async () => {
+    // Only one high-priority (us, GNews) and one low-priority (ly, NewsData) pending.
+    const keep = ["us", "ly"];
+    const done = allCodes.filter((c) => !keep.includes(c));
+    const redis = createFakeRedis({
+      sets: { [doneKey]: done },
+      zsets: { "sentiment:freshness": { ly: NOW.getTime() - (LOW_PRIORITY_DAYS + 1) * DAY_MS } },
+    });
+    const first = await selectDueCountries(redis, NOW);
+    // Both are picked, charged to their own provider.
+    expect(first.counts).toEqual({ gnews: 1, newsdata: 1 });
+
+    // Exhaust GNews only; NewsData budget untouched.
+    await reserveCredits(redis, { newsdata: 0, gnews: GNEWS_MAX_PER_DAY }, first);
+    const { subset, counts, diag } = await selectDueCountries(redis, NOW);
+    expect(diag.gnBudget).toBe(0);
+    expect(subset.map((c) => c.code)).toEqual(["ly"]); // high-priority us is now starved, ly still runs
+    expect(counts).toEqual({ gnews: 0, newsdata: 1 });
+    subset.forEach((c) => expect(HIGH_PRIORITY_CODES.has(c.code)).toBe(false));
   });
 
   it("orders backfill by staleness, never-fetched countries first", async () => {
@@ -69,42 +99,52 @@ describe("selectDueCountries", () => {
   });
 
   it("defers low-priority countries fetched within their cadence, keeps high-priority eligible", async () => {
-    const keep = ["us", "ma"]; // us = high priority, ma = low priority
+    const keep = ["us", "ly"]; // us = high priority, ly = low priority
     const done = allCodes.filter((c) => !keep.includes(c));
 
-    // ma fetched today → inside its 3-day cadence → deferred.
+    // ly fetched today → inside its 3-day cadence → deferred.
     const recent = createFakeRedis({
       sets: { [doneKey]: done },
-      zsets: { "sentiment:freshness": { ma: NOW.getTime() } },
+      zsets: { "sentiment:freshness": { ly: NOW.getTime() } },
     });
     const a = await selectDueCountries(recent, NOW);
     expect(a.subset.map((c) => c.code)).toEqual(["us"]);
     expect(a.diag.lowDeferred).toBeGreaterThanOrEqual(1);
 
-    // ma last fetched 4 days ago → cadence elapsed → eligible again.
+    // ly last fetched 4 days ago → cadence elapsed → eligible again.
     const stale = createFakeRedis({
       sets: { [doneKey]: done },
-      zsets: { "sentiment:freshness": { ma: NOW.getTime() - (LOW_PRIORITY_DAYS + 1) * DAY_MS } },
+      zsets: { "sentiment:freshness": { ly: NOW.getTime() - (LOW_PRIORITY_DAYS + 1) * DAY_MS } },
     });
     const b = await selectDueCountries(stale, NOW);
-    expect(b.subset.map((c) => c.code).sort()).toEqual(["ma", "us"]);
+    expect(b.subset.map((c) => c.code).sort()).toEqual(["ly", "us"]);
   });
 });
 
 describe("reserveCredits", () => {
-  it("increments both the 15-min and daily counters by n", async () => {
+  it("charges each provider's ledger from the counts object", async () => {
     const redis = createFakeRedis();
-    await reserveCredits(redis, 5, { dayId: 100, windowId: 200 });
-    expect(redis._store.get("sentiment:credits:15m:200")).toBe(5);
-    expect(redis._store.get("sentiment:credits:day:100")).toBe(5);
-    await reserveCredits(redis, 3, { dayId: 100, windowId: 200 });
-    expect(redis._store.get("sentiment:credits:15m:200")).toBe(8);
+    await reserveCredits(redis, { newsdata: 5, gnews: 4 }, { dayId: 100, windowId: 200 });
+    expect(redis._store.get("sentiment:credits:nd:15m:200")).toBe(5);
+    expect(redis._store.get("sentiment:credits:nd:day:100")).toBe(5);
+    expect(redis._store.get("sentiment:credits:gn:day:100")).toBe(4);
+    await reserveCredits(redis, { newsdata: 3, gnews: 1 }, { dayId: 100, windowId: 200 });
+    expect(redis._store.get("sentiment:credits:nd:15m:200")).toBe(8);
+    expect(redis._store.get("sentiment:credits:gn:day:100")).toBe(5);
   });
 
-  it("is a no-op for n <= 0", async () => {
+  it("touches only the providers with a positive count", async () => {
     const redis = createFakeRedis();
-    await reserveCredits(redis, 0, { dayId: 100, windowId: 200 });
-    expect(redis._store.has("sentiment:credits:15m:200")).toBe(false);
+    await reserveCredits(redis, { newsdata: 0, gnews: 2 }, { dayId: 100, windowId: 200 });
+    expect(redis._store.has("sentiment:credits:nd:15m:200")).toBe(false);
+    expect(redis._store.get("sentiment:credits:gn:day:100")).toBe(2);
+  });
+
+  it("is a no-op for empty/zero counts", async () => {
+    const redis = createFakeRedis();
+    await reserveCredits(redis, { newsdata: 0, gnews: 0 }, { dayId: 100, windowId: 200 });
+    expect(redis._store.has("sentiment:credits:nd:15m:200")).toBe(false);
+    expect(redis._store.has("sentiment:credits:gn:day:100")).toBe(false);
   });
 });
 

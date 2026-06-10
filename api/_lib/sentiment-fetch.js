@@ -6,165 +6,176 @@ import { now, since, log, debug, DEBUG } from "./logger.js";
 // centre, used to fire each country's daily refresh near 10 pm local. Half-hour
 // zones are rounded to the nearest hour; DST drift of +-1 h is tolerated since
 // NewsData.io's free tier already lags ~12 h, so exact timing doesn't matter.
+//
+// lang = the country's primary news language as a lowercase English name, in the
+// SAME vocabulary NewsData.io reports (see MULTILINGUAL_SUPPORTED_LANGS). High-
+// priority countries are fetched from GNews, whose top-headlines response carries
+// NO per-article language, so we tag every GNews headline with this value to drive
+// the same translate/score routing NewsData's per-article language drives. Azure
+// still auto-detects on translate, so a mistagged stray (e.g. an English wire
+// story in a non-English feed) degrades gracefully rather than breaking.
+
 export const HIGH_PRIORITY_COUNTRIES = [
-  { code: "us", name: "United States", utcOffset: -5 },
-  { code: "in", name: "India", utcOffset: 6 },
-  { code: "es", name: "Spain", utcOffset: 1 },
-  { code: "gb", name: "United Kingdom", utcOffset: 0 },
-  { code: "it", name: "Italy", utcOffset: 1 },
-  { code: "de", name: "Germany", utcOffset: 1 },
-  { code: "ca", name: "Canada", utcOffset: -5 },
-  { code: "fr", name: "France", utcOffset: 1 },
-  { code: "mx", name: "Mexico", utcOffset: -6 },
-  { code: "au", name: "Australia", utcOffset: 10 },
-  { code: "br", name: "Brazil", utcOffset: -3 },
-  { code: "tr", name: "Turkey", utcOffset: 3 },
-  { code: "ru", name: "Russia", utcOffset: 3 },
-  { code: "ar", name: "Argentina", utcOffset: -3 },
-  { code: "pk", name: "Pakistan", utcOffset: 5 },
-  { code: "gr", name: "Greece", utcOffset: 2 },
-  { code: "pt", name: "Portugal", utcOffset: 0 },
-  { code: "pl", name: "Poland", utcOffset: 1 },
-  { code: "ng", name: "Nigeria", utcOffset: 1 },
-  { code: "nl", name: "Netherlands", utcOffset: 1 },
-  { code: "jp", name: "Japan", utcOffset: 9 },
-  { code: "kr", name: "South Korea", utcOffset: 9 },
-  { code: "ve", name: "Venezuela", utcOffset: -4 },
-  { code: "cl", name: "Chile", utcOffset: -4 },
-  { code: "cn", name: "China", utcOffset: 8 },
-  { code: "ph", name: "Philippines", utcOffset: 8 },
-  { code: "id", name: "Indonesia", utcOffset: 7 },
-  { code: "se", name: "Sweden", utcOffset: 1 },
-  { code: "be", name: "Belgium", utcOffset: 1 },
-  { code: "fi", name: "Finland", utcOffset: 2 },
-  { code: "ch", name: "Switzerland", utcOffset: 1 },
-  { code: "ie", name: "Ireland", utcOffset: 0 },
-  { code: "co", name: "Colombia", utcOffset: -5 },
-  { code: "eg", name: "Egypt", utcOffset: 2 },
-  { code: "sa", name: "Saudi Arabia", utcOffset: 3 },
-  { code: "ro", name: "Romania", utcOffset: 2 },
-  { code: "ir", name: "Iran", utcOffset: 3 },
-  { code: "cz", name: "Czech Republic", utcOffset: 1 },
-  { code: "hr", name: "Croatia", utcOffset: 1 },
-  { code: "za", name: "South Africa", utcOffset: 2 },
-  { code: "ps", name: "Palestine", utcOffset: 2 },
-  { code: "il", name: "Israel", utcOffset: 2 },
-  { code: "pe", name: "Peru", utcOffset: -5 },
-  { code: "hu", name: "Hungary", utcOffset: 1 },
-  { code: "ua", name: "Ukraine", utcOffset: 2 },
-  { code: "at", name: "Austria", utcOffset: 1 },
-  { code: "th", name: "Thailand", utcOffset: 7 },
-  { code: "my", name: "Malaysia", utcOffset: 8 },
-  { code: "dk", name: "Denmark", utcOffset: 1 },
-  { code: "no", name: "Norway", utcOffset: 1 },
-  { code: "ae", name: "United Arab Emirates", utcOffset: 4 },
-  { code: "qa", name: "Qatar", utcOffset: 3 },
+  { code: "us", name: "United States", utcOffset: -5, lang: "en" },
+  { code: "in", name: "India", utcOffset: 6, lang: "en" },
+  { code: "es", name: "Spain", utcOffset: 1, lang: "es" },
+  { code: "gb", name: "United Kingdom", utcOffset: 0, lang: "en" },
+  { code: "it", name: "Italy", utcOffset: 1, lang: "it" },
+  { code: "de", name: "Germany", utcOffset: 1, lang: "de" },
+  { code: "ca", name: "Canada", utcOffset: -5, lang: "en" },
+  { code: "fr", name: "France", utcOffset: 1, lang: "fr" },
+  { code: "mx", name: "Mexico", utcOffset: -6, lang: "es" },
+  { code: "au", name: "Australia", utcOffset: 10, lang: "en" },
+  { code: "br", name: "Brazil", utcOffset: -3, lang: "pt" },
+  { code: "tr", name: "Turkey", utcOffset: 3, lang: "tr" },
+  { code: "ru", name: "Russia", utcOffset: 3, lang: "ru" },
+  { code: "ar", name: "Argentina", utcOffset: -3, lang: "es" },
+  { code: "pk", name: "Pakistan", utcOffset: 5, lang: "en" },
+  { code: "gr", name: "Greece", utcOffset: 2, lang: "el" },
+  { code: "pt", name: "Portugal", utcOffset: 0, lang: "pt" },
+  { code: "pl", name: "Poland", utcOffset: 1, lang: "pl" },
+  { code: "ng", name: "Nigeria", utcOffset: 1, lang: "en" },
+  { code: "nl", name: "Netherlands", utcOffset: 1, lang: "nl" },
+  { code: "jp", name: "Japan", utcOffset: 9, lang: "ja" },
+  { code: "kr", name: "South Korea", utcOffset: 9, lang: "ko" },
+  { code: "ve", name: "Venezuela", utcOffset: -4, lang: "es" },
+  { code: "cl", name: "Chile", utcOffset: -4, lang: "es" },
+  { code: "cn", name: "China", utcOffset: 8, lang: "zh" },
+  { code: "ph", name: "Philippines", utcOffset: 8, lang: "en" },
+  { code: "id", name: "Indonesia", utcOffset: 7, lang: "id" },
+  { code: "se", name: "Sweden", utcOffset: 1, lang: "sv" },
+  { code: "be", name: "Belgium", utcOffset: 1, lang: "nl" },
+  { code: "fi", name: "Finland", utcOffset: 2, lang: "fi" },
+  { code: "ch", name: "Switzerland", utcOffset: 1, lang: "de" },
+  { code: "ie", name: "Ireland", utcOffset: 0, lang: "en" },
+  { code: "co", name: "Colombia", utcOffset: -5, lang: "es" },
+  { code: "eg", name: "Egypt", utcOffset: 2, lang: "ar" },
+  { code: "sa", name: "Saudi Arabia", utcOffset: 3, lang: "ar" },
+  { code: "ro", name: "Romania", utcOffset: 2, lang: "ro" },
+  { code: "cz", name: "Czech Republic", utcOffset: 1, lang: "cs" },
+  { code: "za", name: "South Africa", utcOffset: 2, lang: "en" },
+  { code: "il", name: "Israel", utcOffset: 2, lang: "he" },
+  { code: "pe", name: "Peru", utcOffset: -5, lang: "es" },
+  { code: "hu", name: "Hungary", utcOffset: 1, lang: "hu" },
+  { code: "ua", name: "Ukraine", utcOffset: 2, lang: "uk" },
+  { code: "at", name: "Austria", utcOffset: 1, lang: "de" },
+  { code: "th", name: "Thailand", utcOffset: 7, lang: "th" },
+  { code: "my", name: "Malaysia", utcOffset: 8, lang: "en" },
+  { code: "no", name: "Norway", utcOffset: 1, lang: "no" },
+  { code: "ae", name: "United Arab Emirates", utcOffset: 4, lang: "ar" },
+  { code: "bd", name: "Bangladesh", utcOffset: 6, lang: "bn" },
+  { code: "bw", name: "Botswana", utcOffset: 2, lang: "en" },
+  { code: "bg", name: "Bulgaria", utcOffset: 2, lang: "bg" },
+  { code: "cu", name: "Cuba", utcOffset: -5, lang: "es" },
+  { code: "ee", name: "Estonia", utcOffset: 2, lang: "et" },
+  { code: "et", name: "Ethiopia", utcOffset: 3, lang: "en" },
+  { code: "gh", name: "Ghana", utcOffset: 0, lang: "en" },
+  { code: "ke", name: "Kenya", utcOffset: 3, lang: "en" },
+  { code: "lv", name: "Latvia", utcOffset: 2, lang: "lv" },
+  { code: "lb", name: "Lebanon", utcOffset: 2, lang: "ar" },
+  { code: "lt", name: "Lithuania", utcOffset: 2, lang: "lt" },
+  { code: "ma", name: "Morocco", utcOffset: 1, lang: "ar" },
+  { code: "na", name: "Namibia", utcOffset: 2, lang: "en" },
+  { code: "nz", name: "New Zealand", utcOffset: 12, lang: "en" },
+  { code: "sn", name: "Senegal", utcOffset: 0, lang: "fr" },
+  { code: "sk", name: "Slovakia", utcOffset: 1, lang: "sk" },
+  { code: "si", name: "Slovenia", utcOffset: 1, lang: "sl" },
+  { code: "tw", name: "Taiwan", utcOffset: 8, lang: "zh" },
+  { code: "tz", name: "Tanzania", utcOffset: 3, lang: "en" },
+  { code: "ug", name: "Uganda", utcOffset: 3, lang: "en" },
+  { code: "vn", name: "Vietnam", utcOffset: 7, lang: "vi" },
+  { code: "zw", name: "Zimbabwe", utcOffset: 2, lang: "en" },
+  { code: "hk", name: "Hong Kong", utcOffset: 8, lang: "zh" },
+  { code: "sg", name: "Singapore", utcOffset: 8, lang: "en" },
 ];
 
 export const LOW_PRIORITY_COUNTRIES = [
-  { code: "ma", name: "Morocco", utcOffset: 1 },
-  { code: "lt", name: "Lithuania", utcOffset: 2 },
-  { code: "bd", name: "Bangladesh", utcOffset: 6 },
-  { code: "vn", name: "Vietnam", utcOffset: 7 },
-  { code: "by", name: "Belarus", utcOffset: 3 },
-  { code: "zw", name: "Zimbabwe", utcOffset: 2 },
-  { code: "dz", name: "Algeria", utcOffset: 1 },
-  { code: "sy", name: "Syria", utcOffset: 3 },
-  { code: "ye", name: "Yemen", utcOffset: 3 },
-  { code: "jo", name: "Jordan", utcOffset: 3 },
-  { code: "iq", name: "Iraq", utcOffset: 3 },
-  { code: "lb", name: "Lebanon", utcOffset: 2 },
-  { code: "et", name: "Ethiopia", utcOffset: 3 },
-  { code: "ly", name: "Libya", utcOffset: 2 },
-  { code: "af", name: "Afghanistan", utcOffset: 4 },
-  { code: "mm", name: "Myanmar", utcOffset: 6 },
-  { code: "nz", name: "New Zealand", utcOffset: 12 },
-  { code: "ke", name: "Kenya", utcOffset: 3 },
-  { code: "uy", name: "Uruguay", utcOffset: -3 },
-  { code: "bo", name: "Bolivia", utcOffset: -4 },
-  { code: "gh", name: "Ghana", utcOffset: 0 },
-  { code: "om", name: "Oman", utcOffset: 4 },
-  { code: "sn", name: "Senegal", utcOffset: 0 },
-  { code: "so", name: "Somalia", utcOffset: 3 },
-  { code: "sd", name: "Sudan", utcOffset: 2 },
-  { code: "py", name: "Paraguay", utcOffset: -4 },
-  { code: "ug", name: "Uganda", utcOffset: 3 },
-  { code: "kz", name: "Kazakhstan", utcOffset: 5 },
-  { code: "na", name: "Namibia", utcOffset: 2 },
-  { code: "zm", name: "Zambia", utcOffset: 2 },
-  { code: "cd", name: "DR Congo", utcOffset: 1 },
-  { code: "ao", name: "Angola", utcOffset: 1 },
-  { code: "mz", name: "Mozambique", utcOffset: 2 },
-  { code: "uz", name: "Uzbekistan", utcOffset: 5 },
-  { code: "cm", name: "Cameroon", utcOffset: 1 },
-  { code: "tz", name: "Tanzania", utcOffset: 3 },
-  { code: "mn", name: "Mongolia", utcOffset: 8 },
-  { code: "kp", name: "North Korea", utcOffset: 9 },
-  { code: "ml", name: "Mali", utcOffset: 0 },
-  { code: "bw", name: "Botswana", utcOffset: 2 },
-  { code: "td", name: "Chad", utcOffset: 1 },
-  { code: "mr", name: "Mauritania", utcOffset: 0 },
-  { code: "ne", name: "Niger", utcOffset: 1 },
-  { code: "cf", name: "Central African Republic", utcOffset: 1 },
-  { code: "ga", name: "Gabon", utcOffset: 1 },
-  { code: "cg", name: "Congo", utcOffset: 1 },
-  { code: "gn", name: "Guinea", utcOffset: 0 },
-  { code: "ci", name: "Ivory Coast", utcOffset: 0 },
-  { code: "bf", name: "Burkina Faso", utcOffset: 0 },
-  { code: "mg", name: "Madagascar", utcOffset: 3 },
-  { code: "tm", name: "Turkmenistan", utcOffset: 5 },
-  { code: "kg", name: "Kyrgyzstan", utcOffset: 5 },
-  { code: "tj", name: "Tajikistan", utcOffset: 5 },
-  { code: "az", name: "Azerbaijan", utcOffset: 4 },
-  { code: "am", name: "Armenia", utcOffset: 4 },
-  { code: "ge", name: "Georgia", utcOffset: 4 },
-  { code: "pg", name: "Papua New Guinea", utcOffset: 10 },
-  { code: "kh", name: "Cambodia", utcOffset: 7 },
-  { code: "la", name: "Laos", utcOffset: 7 },
-  { code: "al", name: "Albania", utcOffset: 1 },
-  { code: "si", name: "Slovenia", utcOffset: 1 },
-  { code: "sk", name: "Slovakia", utcOffset: 1 },
-  { code: "rs", name: "Serbia", utcOffset: 1 },
-  { code: "bg", name: "Bulgaria", utcOffset: 2 },
-  { code: "ba", name: "Bosnia and Herzegovina", utcOffset: 1 },
-  { code: "mk", name: "North Macedonia", utcOffset: 1 },
-  { code: "me", name: "Montenegro", utcOffset: 1 },
-  { code: "md", name: "Moldova", utcOffset: 2 },
-  { code: "tw", name: "Taiwan", utcOffset: 8 },
-  { code: "mw", name: "Malawi", utcOffset: 2 },
-  { code: "ec", name: "Ecuador", utcOffset: -5 },
-  { code: "sr", name: "Suriname", utcOffset: -3 },
-  { code: "gy", name: "Guyana", utcOffset: -4 },
-  { code: "lk", name: "Sri Lanka", utcOffset: 6 },
-  { code: "np", name: "Nepal", utcOffset: 6 },
-  { code: "lv", name: "Latvia", utcOffset: 2 },
-  { code: "ee", name: "Estonia", utcOffset: 2 },
-  { code: "cu", name: "Cuba", utcOffset: -5 },
-  { code: "gt", name: "Guatemala", utcOffset: -6 },
-  { code: "hn", name: "Honduras", utcOffset: -6 },
-  { code: "ni", name: "Nicaragua", utcOffset: -6 },
-  { code: "cr", name: "Costa Rica", utcOffset: -6 },
-  { code: "pa", name: "Panama", utcOffset: -5 },
-  { code: "is", name: "Iceland", utcOffset: 0 },
-  { code: "tn", name: "Tunisia", utcOffset: 1 },
-  { code: "bt", name: "Bhutan", utcOffset: 6 },
-  { code: "kw", name: "Kuwait", utcOffset: 3 },
-  { code: "bh", name: "Bahrain", utcOffset: 3 },
-  { code: "er", name: "Eritrea", utcOffset: 3 },
-  { code: "dj", name: "Djibouti", utcOffset: 3 },
-  { code: "rw", name: "Rwanda", utcOffset: 2 },
-  { code: "bi", name: "Burundi", utcOffset: 2 },
-  { code: "tg", name: "Togo", utcOffset: 0 },
-  { code: "bj", name: "Benin", utcOffset: 0 },
-  { code: "lr", name: "Liberia", utcOffset: 0 },
-  { code: "sl", name: "Sierra Leone", utcOffset: 0 },
-  { code: "gm", name: "Gambia", utcOffset: 0 },
-  { code: "ls", name: "Lesotho", utcOffset: 2 },
-  { code: "gq", name: "Equatorial Guinea", utcOffset: 1 },
-  { code: "bz", name: "Belize", utcOffset: -6 },
-  { code: "sv", name: "El Salvador", utcOffset: -6 },
-  { code: "do", name: "Dominican Republic", utcOffset: -4 },
-  { code: "ht", name: "Haiti", utcOffset: -5 }
+  { code: "ir", name: "Iran", utcOffset: 3, lang: "fa" },
+  { code: "hr", name: "Croatia", utcOffset: 1, lang: "hr" },
+  { code: "ps", name: "Palestine", utcOffset: 2, lang: "ar" },
+  { code: "dk", name: "Denmark", utcOffset: 1, lang: "da" },
+  { code: "qa", name: "Qatar", utcOffset: 3, lang: "ar" },
+  { code: "by", name: "Belarus", utcOffset: 3, lang: "ru" },
+  { code: "dz", name: "Algeria", utcOffset: 1, lang: "ar" },
+  { code: "sy", name: "Syria", utcOffset: 3, lang: "ar" },
+  { code: "ye", name: "Yemen", utcOffset: 3, lang: "ar" },
+  { code: "jo", name: "Jordan", utcOffset: 3, lang: "ar" },
+  { code: "iq", name: "Iraq", utcOffset: 3, lang: "ar" },
+  { code: "ly", name: "Libya", utcOffset: 2, lang: "ar" },
+  { code: "af", name: "Afghanistan", utcOffset: 4, lang: "en" },
+  { code: "mm", name: "Myanmar", utcOffset: 6, lang: "my" },
+  { code: "uy", name: "Uruguay", utcOffset: -3, lang: "es" },
+  { code: "bo", name: "Bolivia", utcOffset: -4, lang: "es" },
+  { code: "om", name: "Oman", utcOffset: 4, lang: "ar" },
+  { code: "so", name: "Somalia", utcOffset: 3, lang: "en" },
+  { code: "sd", name: "Sudan", utcOffset: 2, lang: "ar" },
+  { code: "py", name: "Paraguay", utcOffset: -4, lang: "es" },
+  { code: "kz", name: "Kazakhstan", utcOffset: 5, lang: "kz" },
+  { code: "zm", name: "Zambia", utcOffset: 2, lang: "en" },
+  { code: "cd", name: "DR Congo", utcOffset: 1, lang: "fr" },
+  { code: "ao", name: "Angola", utcOffset: 1, lang: "pt" },
+  { code: "mz", name: "Mozambique", utcOffset: 2, lang: "pt" },
+  { code: "uz", name: "Uzbekistan", utcOffset: 5, lang: "uz" },
+  { code: "cm", name: "Cameroon", utcOffset: 1, lang: "fr" },
+  { code: "mn", name: "Mongolia", utcOffset: 8, lang: "mn" },
+  { code: "kp", name: "North Korea", utcOffset: 9, lang: "ko" },
+  { code: "ml", name: "Mali", utcOffset: 0, lang: "fr" },
+  { code: "td", name: "Chad", utcOffset: 1, lang: "fr" },
+  { code: "mr", name: "Mauritania", utcOffset: 0, lang: "ar" },
+  { code: "ne", name: "Niger", utcOffset: 1, lang: "fr" },
+  { code: "cf", name: "Central African Republic", utcOffset: 1, lang: "fr" },
+  { code: "ga", name: "Gabon", utcOffset: 1, lang: "fr" },
+  { code: "cg", name: "Congo", utcOffset: 1, lang: "fr" },
+  { code: "gn", name: "Guinea", utcOffset: 0, lang: "fr" },
+  { code: "ci", name: "Ivory Coast", utcOffset: 0, lang: "fr" },
+  { code: "bf", name: "Burkina Faso", utcOffset: 0, lang: "fr" },
+  { code: "mg", name: "Madagascar", utcOffset: 3, lang: "fr" },
+  { code: "tm", name: "Turkmenistan", utcOffset: 5, lang: "tk" },
+  { code: "kg", name: "Kyrgyzstan", utcOffset: 5, lang: "ru" },
+  { code: "tj", name: "Tajikistan", utcOffset: 5, lang: "tg" },
+  { code: "az", name: "Azerbaijan", utcOffset: 4, lang: "az" },
+  { code: "am", name: "Armenia", utcOffset: 4, lang: "hy" },
+  { code: "ge", name: "Georgia", utcOffset: 4, lang: "ka" },
+  { code: "pg", name: "Papua New Guinea", utcOffset: 10, lang: "en" },
+  { code: "kh", name: "Cambodia", utcOffset: 7, lang: "kh" },
+  { code: "la", name: "Laos", utcOffset: 7, lang: "en" },
+  { code: "al", name: "Albania", utcOffset: 1, lang: "sq" },
+  { code: "rs", name: "Serbia", utcOffset: 1, lang: "sr" },
+  { code: "ba", name: "Bosnia and Herzegovina", utcOffset: 1, lang: "bs" },
+  { code: "mk", name: "North Macedonia", utcOffset: 1, lang: "mk" },
+  { code: "me", name: "Montenegro", utcOffset: 1, lang: "sr" },
+  { code: "md", name: "Moldova", utcOffset: 2, lang: "ro" },
+  { code: "mw", name: "Malawi", utcOffset: 2, lang: "en" },
+  { code: "ec", name: "Ecuador", utcOffset: -5, lang: "es" },
+  { code: "sr", name: "Suriname", utcOffset: -3, lang: "nl" },
+  { code: "gy", name: "Guyana", utcOffset: -4, lang: "en" },
+  { code: "lk", name: "Sri Lanka", utcOffset: 6, lang: "en" },
+  { code: "np", name: "Nepal", utcOffset: 6, lang: "ne" },
+  { code: "gt", name: "Guatemala", utcOffset: -6, lang: "es" },
+  { code: "hn", name: "Honduras", utcOffset: -6, lang: "es" },
+  { code: "ni", name: "Nicaragua", utcOffset: -6, lang: "es" },
+  { code: "cr", name: "Costa Rica", utcOffset: -6, lang: "es" },
+  { code: "pa", name: "Panama", utcOffset: -5, lang: "es" },
+  { code: "is", name: "Iceland", utcOffset: 0, lang: "is" },
+  { code: "tn", name: "Tunisia", utcOffset: 1, lang: "ar" },
+  { code: "bt", name: "Bhutan", utcOffset: 6, lang: "en" },
+  { code: "kw", name: "Kuwait", utcOffset: 3, lang: "ar" },
+  { code: "bh", name: "Bahrain", utcOffset: 3, lang: "ar" },
+  { code: "er", name: "Eritrea", utcOffset: 3, lang: "en" },
+  { code: "dj", name: "Djibouti", utcOffset: 3, lang: "fr" },
+  { code: "rw", name: "Rwanda", utcOffset: 2, lang: "en" },
+  { code: "bi", name: "Burundi", utcOffset: 2, lang: "fr" },
+  { code: "tg", name: "Togo", utcOffset: 0, lang: "fr" },
+  { code: "bj", name: "Benin", utcOffset: 0, lang: "fr" },
+  { code: "lr", name: "Liberia", utcOffset: 0, lang: "en" },
+  { code: "sl", name: "Sierra Leone", utcOffset: 0, lang: "en" },
+  { code: "gm", name: "Gambia", utcOffset: 0, lang: "en" },
+  { code: "ls", name: "Lesotho", utcOffset: 2, lang: "en" },
+  { code: "gq", name: "Equatorial Guinea", utcOffset: 1, lang: "es" },
+  { code: "bz", name: "Belize", utcOffset: -6, lang: "en" },
+  { code: "sv", name: "El Salvador", utcOffset: -6, lang: "es" },
+  { code: "do", name: "Dominican Republic", utcOffset: -4, lang: "es" },
+  { code: "ht", name: "Haiti", utcOffset: -5, lang: "fr" },
 ];
 
 // All supported countries, high tier first. Derived so existing consumers
@@ -180,6 +191,35 @@ export const CACHE_TTL = 25 * 60 * 60; // 25 hours - overlap ensures cron always
 export const NEWSDATA_DELAY_MS = 2000; // gap between consecutive requests - keeps us under NewsData.io's 1 req/sec limit (1000ms safety margin)
 export const NEWSDATA_MAX_RETRIES = 1; // retries on HTTP 429 / transient network errors before giving up on a country
 export const NEWSDATA_BACKOFF_BASE_MS = 2000; // first backoff when no Retry-After header is present
+export const GNEWS_DELAY_MS = 500; // gap between consecutive GNews requests - GNews free tier is request-count limited (no strict req/sec), so a small courtesy gap suffices
+export const GNEWS_MAX_RETRIES = 1; // retries on HTTP 429 / transient network errors before giving up on a country
+export const GNEWS_BACKOFF_BASE_MS = 2000; // first backoff when no Retry-After header is present
+export const GNEWS_SIZE = 5; // headlines per high-priority country - matches NewsData's size=5 so cross-provider averages are comparable (free tier caps at 10)
+
+// ISO 639-1 code → NewsData.io / MULTILINGUAL_SUPPORTED_LANGS language name.
+// Used in fetchHeadlinesGNews to (a) decide whether to send a `lang=` filter to
+// GNews (GNews supports exactly this subset of ISO codes) and (b) tag each GNews
+// article with the English name the translate/score router expects — mirroring
+// the format NewsData.io uses for its per-article `language` field.
+const ISO_TO_NEWSDATA_LANG = {
+  "en": "english", "es": "spanish", "it": "italian", "de": "german", "fr": "french",
+  "pt": "portuguese", "ru": "russian", "el": "greek", "nl": "dutch", "ja": "japanese",
+  "zh": "chinese", "sv": "swedish", "ar": "arabic", "ro": "romanian", "he": "hebrew",
+  "uk": "ukrainian", "no": "norwegian", "hi": "hindi",
+};
+
+// NewsData.io `language` (ISO 639-1) codes we filter on. Low-priority countries
+// already carry their primary language as a 2-letter code (see LOW_PRIORITY_COUNTRIES),
+// so fetchHeadlines passes it straight through - but only when it's in this allowlist
+// of codes NewsData actually supports. A country whose code is absent (or an invalid
+// stray like "kz"/"kh") omits the language parameter and falls back to the country
+// filter alone, rather than risking a 422 UnsupportedLanguage.
+const NEWSDATA_SUPPORTED_LANGS = new Set([
+  "en", "es", "it", "de", "fr", "pt", "ru", "el", "nl", "ja", "zh", "sv", "ar",
+  "ro", "he", "uk", "no", "hi", "tr", "ko", "th", "id", "ms", "pl", "cs", "hu",
+  "bg", "vi", "bn", "fa", "hr", "da", "et", "lv", "lt", "sk", "sl", "sq", "sr",
+  "bs", "mk", "my", "hy", "az", "ne", "ur", "fi", "mn", "ka", "km", "lo", "uz",
+]);
 export const FETCH_TIMEOUT_MS = 12000; // abort any single external request that hangs, so one stuck connection can't stall the whole tick
 export const HF_MAX_RETRIES = 1; // retries on HF 503 (model loading) / 429 / transient network errors before nulling a batch
 export const HF_BACKOFF_BASE_MS = 2000; // first backoff when no Retry-After / estimated_time is present
@@ -225,6 +265,15 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Last path segment of a HF model URL, for terse log lines (e.g. "twitter-xlm-roberta-base-sentiment").
 const modelShortName = (url) => url.split("/").pop();
 
+// Normalize a provider timestamp to an ISO string, or null if missing/unparseable.
+// new Date(bad).toISOString() THROWS (RangeError), so a single malformed publishedAt
+// must be parsed defensively or it would abort the whole country's fetch.
+const toIsoOrNull = (value) => {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+};
+
 // Parse a Retry-After header (RFC 7231): either delta-seconds or an HTTP date.
 // Returns the wait in ms, or null when the header is missing/unparseable.
 export function parseRetryAfter(headerValue) {
@@ -236,54 +285,59 @@ export function parseRetryAfter(headerValue) {
   return null;
 }
 
-// Returns { articles, status, latencyMs, attempts } - `status` is a coarse outcome
-// label (ok | empty | unsupported | rate_limited | http_<code> | timeout |
-// network_error | invalid_json | api_error) the caller folds into the run summary.
-async function fetchHeadlines(countryCode) {
-  const url = `https://newsdata.io/api/1/latest?country=${countryCode.toLowerCase()}&category=top&removeduplicate=1&size=5&apikey=${process.env.NEWSDATA_API_KEY}`;
-  const start = now();
-  let attempts = 0;
-  const out = (articles, status) => ({ articles, status, latencyMs: since(start), attempts });
-
+// Shared retry loop for HTTP headline fetches. Handles two transient failure modes:
+//   - HTTP 429: honor Retry-After when present, else exponential backoff.
+//   - connection errors (fetch throws): exponential backoff.
+// Returns { res, attempts } on a non-429 HTTP response, or
+//         { res: null, status, attempts } when retries are exhausted.
+async function fetchWithRetry(url, { tag, code, maxRetries, minGapMs, backoffBaseMs }) {
   let res;
-  // Retry loop for two transient failure modes:
-  //   - HTTP 429 (rate limited): honor Retry-After when present, else exp. backoff.
-  //   - connection errors (fetch throws before any response): exp. backoff.
-  // Each wait counts against the global 1 req/sec budget anyway, so this only
-  // adds latency on contention - never extra throughput.
+  let attempts = 0;
   for (let attempt = 0; ; attempt++) {
     attempts = attempt + 1;
     try {
       res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     } catch (err) {
-      // Re-throw non-retryable errors so the caller's catch logs them as-is.
       if (!isRetryableNetworkError(err)) throw err;
-      const code = err?.cause?.code ?? err?.code ?? err?.name;
+      const errCode = err?.cause?.code ?? err?.code ?? err?.name;
       const status = err?.name === "TimeoutError" ? "timeout" : "network_error";
-      if (attempt >= NEWSDATA_MAX_RETRIES) {
-        console.error(`[NewsData] ${countryCode}: ${code} - gave up after ${attempt} retries`);
-        return out([], status);
+      if (attempt >= maxRetries) {
+        console.error(`[${tag}] ${code}: ${errCode} - gave up after ${attempt} retries`);
+        return { res: null, status, attempts };
       }
-      const wait = Math.max(NEWSDATA_DELAY_MS, NEWSDATA_BACKOFF_BASE_MS * 2 ** attempt);
-      console.warn(`[NewsData] ${countryCode}: ${code} - retrying in ${wait}ms (attempt ${attempt + 1}/${NEWSDATA_MAX_RETRIES})`);
+      const wait = Math.max(minGapMs, backoffBaseMs * 2 ** attempt);
+      console.warn(`[${tag}] ${code}: ${errCode} - retrying in ${wait}ms (attempt ${attempt + 1}/${maxRetries})`);
       await delay(wait);
       continue;
     }
-
     if (res.status !== 429) break;
-    if (attempt >= NEWSDATA_MAX_RETRIES) {
-      console.error(`[NewsData] ${countryCode}: HTTP 429 - gave up after ${attempt} retries`);
-      return out([], "rate_limited");
+    if (attempt >= maxRetries) {
+      console.error(`[${tag}] ${code}: HTTP 429 - gave up after ${attempt} retries`);
+      return { res: null, status: "rate_limited", attempts };
     }
     const retryAfter = parseRetryAfter(res.headers.get("retry-after"));
-    // Exponential backoff with a hard floor of the per-request delay so we never
-    // hammer the API faster than the rate limit even on the very first retry.
-    const backoff = retryAfter ?? NEWSDATA_BACKOFF_BASE_MS * 2 ** attempt;
-    const wait = Math.max(NEWSDATA_DELAY_MS, backoff);
-    console.warn(`[NewsData] ${countryCode}: HTTP 429 - retrying in ${wait}ms (attempt ${attempt + 1}/${NEWSDATA_MAX_RETRIES})`);
+    const wait = Math.max(minGapMs, retryAfter ?? backoffBaseMs * 2 ** attempt);
+    console.warn(`[${tag}] ${code}: HTTP 429 - retrying in ${wait}ms (attempt ${attempt + 1}/${maxRetries})`);
     await delay(wait);
   }
+  return { res, status: null, attempts };
+}
 
+// Returns { articles, status, latencyMs, attempts } - `status` is a coarse outcome
+// label (ok | empty | unsupported | rate_limited | http_<code> | timeout |
+// network_error | invalid_json | api_error) the caller folds into the run summary.
+async function fetchHeadlines(country) {
+  const { code: countryCode, lang } = country;
+  const langParam = lang && NEWSDATA_SUPPORTED_LANGS.has(lang) ? `&language=${lang}` : "";
+  const url = `https://newsdata.io/api/1/latest?country=${countryCode.toLowerCase()}${langParam}&category=top&prioritydomain=top&sort=source&removeduplicate=1&size=5&apikey=${process.env.NEWSDATA_API_KEY}`;
+  const start = now();
+  const { res, status: earlyStatus, attempts } = await fetchWithRetry(url, {
+    tag: "NewsData", code: countryCode,
+    maxRetries: NEWSDATA_MAX_RETRIES, minGapMs: NEWSDATA_DELAY_MS, backoffBaseMs: NEWSDATA_BACKOFF_BASE_MS,
+  });
+  const out = (articles, status) => ({ articles, status, latencyMs: since(start), attempts });
+
+  if (!res) return out([], earlyStatus);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     // Unsupported country (HTTP 422 / UnsupportedFilter): log a clean, intentional
@@ -318,8 +372,74 @@ async function fetchHeadlines(countryCode) {
     articles.push({
       title: a.title,
       url: a.link,
-      publishedAt: a.pubDate ? new Date(a.pubDate.replace(" ", "T") + "Z").toISOString() : null,
+      publishedAt: toIsoOrNull(a.pubDate ? a.pubDate.replace(" ", "T") + "Z" : null),
       language: a.language || null,
+    });
+  }
+  return out(articles, articles.length ? "ok" : "empty");
+}
+
+// GNews top-headlines: popularity/relevance-ranked top stories per country - the
+// app's focus - complementing NewsData's recency-only feed. Used for high-priority
+// countries (all within GNews's ~71-country coverage). Returns the SAME contract
+// as fetchHeadlines - { articles, status, latencyMs, attempts } - so fetchCountries
+// can route by tier without caring which provider produced the headlines.
+//
+// `country` is a HIGH_PRIORITY_COUNTRIES entry (needs `code` + `lang`). GNews gives
+// no per-article language, so every headline is tagged with `country.lang`.
+async function fetchHeadlinesGNews(country) {
+  const { code, lang } = country;
+  const params = new URLSearchParams({
+    category: "general",
+    country: code.toLowerCase(),
+    max: String(GNEWS_SIZE),
+    apikey: process.env.GNEWS_API_KEY ?? "",
+  });
+  // lang is the ISO 639-1 code from HIGH_PRIORITY_COUNTRIES. ISO_TO_NEWSDATA_LANG
+  // doubles as the GNews supported-lang allowlist: if the ISO code is present,
+  // GNews accepts it directly as the `lang=` parameter value.
+  if (ISO_TO_NEWSDATA_LANG[lang]) params.set("lang", lang);
+  const url = `https://gnews.io/api/v4/top-headlines?${params}`;
+  const start = now();
+  const { res, status: earlyStatus, attempts } = await fetchWithRetry(url, {
+    tag: "GNews", code,
+    maxRetries: GNEWS_MAX_RETRIES, minGapMs: GNEWS_DELAY_MS, backoffBaseMs: GNEWS_BACKOFF_BASE_MS,
+  });
+  const out = (articles, status) => ({ articles, status, latencyMs: since(start), attempts });
+
+  if (!res) return out([], earlyStatus);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.error(`[GNews] ${code}: HTTP ${res.status} - ${body.slice(0, 400)}`);
+    return out([], `http_${res.status}`);
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    console.error(`[GNews] ${code}: invalid JSON response`);
+    return out([], "invalid_json");
+  }
+  if (!Array.isArray(data.articles)) {
+    console.error(`[GNews] ${code}: ${JSON.stringify(data).slice(0, 400)}`);
+    return out([], "api_error");
+  }
+  // Dedupe by url (falling back to normalized title) so a country isn't filled
+  // with repeats - mirrors the NewsData path.
+  const seen = new Set();
+  const articles = [];
+  for (const a of data.articles) {
+    const key = (a.url || a.title || "").trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    articles.push({
+      title: a.title,
+      url: a.url,
+      publishedAt: toIsoOrNull(a.publishedAt),
+      // Convert ISO code to the English name MULTILINGUAL_SUPPORTED_LANGS and the
+      // "english" routing guard expect. Falls back to the ISO code for unmapped
+      // languages (they route to the translate path, which is correct).
+      language: ISO_TO_NEWSDATA_LANG[lang] ?? lang,
     });
   }
   return out(articles, articles.length ? "ok" : "empty");
@@ -526,26 +646,43 @@ export async function fetchCountries(subset, stats = {}) {
   // Per-country fetch outcome, keyed by code (merged with scores in Phase 5).
   const meta = new Map();
 
-  // Phase 1: fetch headlines strictly one country at a time, pausing
-  // NEWSDATA_DELAY_MS between requests so we never exceed NewsData.io's
-  // 1 req/sec limit. fetchHeadlines additionally retries on HTTP 429.
-  const tFetch = now();
-  const fetched = [];
-  for (let i = 0; i < subset.length; i++) {
-    if (i > 0) await delay(NEWSDATA_DELAY_MS);
-    const { code, name } = subset[i];
-    try {
-      const { articles, status, latencyMs, attempts } = await fetchHeadlines(code);
-      meta.set(code, { status, ms: latencyMs, attempts });
-      log("NewsData", code, { status, ms: latencyMs, art: articles.length, tries: attempts });
-      fetched.push({ code, name, articles, lang: dominantLanguage(articles) });
-    } catch (err) {
-      // One country's failure must never abort the remaining countries.
-      meta.set(code, { status: "error", ms: 0, attempts: 0 });
-      console.error(`[fetchCountries] ${code} headlines:`, err);
-      fetched.push({ code, name, articles: [], lang: null });
+  // Phase 1: fetch headlines in two parallel batches — one per provider.
+  // Within each batch, requests are spaced by that provider's gap so its rate
+  // limit is respected. The two providers share no quota, so the batches can
+  // overlap freely and the wall-clock time is max(gnBatchTime, ndBatchTime)
+  // instead of their sum.
+  const fetchBatch = async (countries, fetcher, delayMs, provider) => {
+    const results = [];
+    for (let i = 0; i < countries.length; i++) {
+      if (i > 0) await delay(delayMs);
+      const { code, name } = countries[i];
+      try {
+        const { articles, status, latencyMs, attempts } = await fetcher(countries[i]);
+        meta.set(code, { status, ms: latencyMs, attempts });
+        log(provider, code, { status, ms: latencyMs, art: articles.length, tries: attempts });
+        results.push({ code, name, articles, lang: dominantLanguage(articles) });
+      } catch (err) {
+        // One country's failure must never abort the remaining countries.
+        meta.set(code, { status: "error", ms: 0, attempts: 0 });
+        console.error(`[fetchCountries] ${code} headlines:`, err);
+        results.push({ code, name, articles: [], lang: null });
+      }
     }
-  }
+    return results;
+  };
+
+  const tFetch = now();
+  const [gnFetched, ndFetched] = await Promise.all([
+    fetchBatch(
+      subset.filter((c) => HIGH_PRIORITY_CODES.has(c.code)),
+      fetchHeadlinesGNews, GNEWS_DELAY_MS, "GNews"
+    ),
+    fetchBatch(
+      subset.filter((c) => !HIGH_PRIORITY_CODES.has(c.code)),
+      fetchHeadlines, NEWSDATA_DELAY_MS, "NewsData"
+    ),
+  ]);
+  const fetched = [...gnFetched, ...ndFetched];
   const fetchMs = since(tFetch);
 
   // Phase 2: flatten to individual headlines, routed by EACH headline's own

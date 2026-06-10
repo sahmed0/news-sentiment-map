@@ -1,20 +1,43 @@
 # News Sentiment Map
 
 A world map coloured by the sentiment of each country's latest news headlines.
-Headlines come from NewsData.io, are translated (Azure) and scored (HuggingFace),
-and the result is cached in Upstash Redis.
+Headlines are translated (Azure) and scored (HuggingFace), and the result is
+cached in Upstash Redis.
+
+## Headline sources (hybrid)
+
+The app focuses on the **most popular** headlines, which NewsData.io doesn't rank
+for (it returns by recency), so headlines come from **two providers, routed by tier**:
+
+- **GNews** (popularity-ranked top headlines) for the **high-priority** countries.
+  GNews covers ~71 countries, which the high-priority tier stays within.
+- **NewsData.io** (recency, but ~155-country reach) for the **low-priority**
+  countries, so total coverage isn't capped at GNews's smaller country list.
+
+`fetchCountries(subset)` routes each country by `HIGH_PRIORITY_CODES` membership and
+returns the same enriched shape regardless of provider. GNews returns no per-article
+language, so each high-priority country carries a primary `lang` (in NewsData's
+vocabulary) used to tag its GNews headlines for the translate/score routing.
+Requires a `GNEWS_API_KEY` env var alongside `NEWSDATA_API_KEY`.
 
 ## Data refresh architecture
 
-NewsData.io's free tier allows **30 credits / 15 min** and **200 / day** (1 credit =
-1 request). To stay within that while keeping ~105 countries fresh, refresh is a
-**rolling, timezone-aware tick** rather than one big sweep:
+The two providers have **independent quotas**, tracked by **separate credit
+ledgers** so neither throttles the other:
+
+- **NewsData.io** free tier: **30 credits / 15 min** and **200 / day** (1 credit = 1
+  request).
+- **GNews** free tier: **~100 requests / day** (no sub-window limit).
+
+To stay within both while keeping ~155 countries fresh, refresh is a **rolling,
+timezone-aware tick** rather than one big sweep:
 
 - **`api/cron/refresh.js`** is the only writer. Each tick refreshes the countries
   whose local time is ~10 pm now (which surfaces that morning's ~10 am news, given
   NewsData's ~12 h free-tier lag), plus the stalest remaining countries to use any
   spare budget and recover
-  prior failures. A credit ledger in Redis makes exceeding the limit impossible.
+  prior failures. Per-provider credit ledgers in Redis make exceeding either API's
+  limit impossible.
 - **Per-country storage** (`sentiment:country:<code>`, no TTL) + an aggregate
   (`sentiment:world`) rebuilt every tick. A single country's failure isolates to
   that country and self-heals next tick; the served map never goes blank.

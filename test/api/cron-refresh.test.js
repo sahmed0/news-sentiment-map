@@ -88,7 +88,13 @@ describe("POST /api/cron/refresh — orchestration", () => {
       return redis;
     });
 
-    const selection = { subset: [{ code: "us" }], dayId: 1, windowId: 2, diag: { budget: 5 } };
+    const selection = {
+      subset: [{ code: "us" }],
+      counts: { gnews: 1, newsdata: 0 },
+      dayId: 1,
+      windowId: 2,
+      diag: { budget: 5 },
+    };
     selectDueCountries.mockResolvedValue(selection);
     reserveCredits.mockResolvedValue();
     fetchCountries.mockResolvedValue([{ code: "us", score: 0.3, articles: [] }]);
@@ -100,7 +106,7 @@ describe("POST /api/cron/refresh — orchestration", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({ ok: true, refreshed: ["us"], attempted: 1, aggregate: 1 });
-    expect(reserveCredits).toHaveBeenCalledWith(redis, 1, selection);
+    expect(reserveCredits).toHaveBeenCalledWith(redis, selection.counts, selection);
     expect(fetchCountries).toHaveBeenCalledWith(selection.subset, expect.any(Object));
     expect(persistCountries).toHaveBeenCalled();
     expect(rebuildAggregate).toHaveBeenCalled();
@@ -112,7 +118,7 @@ describe("POST /api/cron/refresh — orchestration", () => {
     Redis.mockImplementation(function () {
       return createFakeRedis();
     });
-    selectDueCountries.mockResolvedValue({ subset: [], dayId: 1, windowId: 2, diag: { budget: 0 } });
+    selectDueCountries.mockResolvedValue({ subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 1, windowId: 2, diag: { budget: 0 } });
     rebuildAggregate.mockResolvedValue(7);
 
     const res = mockRes();

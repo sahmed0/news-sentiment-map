@@ -83,7 +83,17 @@ export function InfoPanel({ open, onClose }) {
                 Data pipeline
               </h3>
               <p>
-                Up to 5 of the most popular news headlines are fetched per country from{" "}
+                Up to 5 of the most popular news headlines are fetched per country. High priority
+                countries use{" "}
+                <a
+                  href="https://gnews.io"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-fg/95 light:text-black underline underline-offset-2 hover:opacity-70 transition-opacity"
+                >
+                  GNews
+                </a>
+                {" "}(which ranks stories by popularity), while the remaining countries use{" "}
                 <a
                   href="https://newsdata.io"
                   target="_blank"
@@ -92,7 +102,7 @@ export function InfoPanel({ open, onClose }) {
                 >
                   NewsData.io
                 </a>
-                . Non-English headlines are translated via{" "}
+                {" "}for broader global coverage. Non-English headlines are translated via{" "}
                 <a
                   href="https://azure.microsoft.com/en-us/services/cognitive-services/translator/"
                   target="_blank"
@@ -128,7 +138,7 @@ export function InfoPanel({ open, onClose }) {
                 Coverage
               </h3>
               <p>
-                Coverage is dictated by the rate limits of the NewsData.io, Hugging Face, and Microsoft Azure Translator APIs. Therefore, small island nations, microstates, and countries with very limited online press presence are not covered.
+                Coverage is dictated by the rate limits of the GNews, NewsData.io, Hugging Face, and Microsoft Azure Translator APIs. Therefore, small island nations, microstates, and countries with very limited online press presence are not covered.
                 <br></br>
                 Additionally, the covered countries are split into high & low priority groups based on their global media presence. High priority countries are updated every day, while low priority countries are updated every 3 days.
                 Some low priority countries that are currently covered may be removed if rate limits become difficult to manage.
