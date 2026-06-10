@@ -16,7 +16,7 @@ import { createFakeRedis } from "../helpers/fakeRedis.js";
 
 const dayIdOf = (now) => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
 
-const NOW = new Date("2024-06-01T12:30:00Z"); // hour 12 UTC — chosen so the tested countries fall to backfill, not tz-due
+const NOW = new Date("2024-06-01T12:30:00Z"); // hour 12 UTC - chosen so the tested countries fall to backfill, not tz-due
 const allCodes = COUNTRIES.map((c) => c.code);
 const doneKey = `sentiment:done:${dayIdOf(NOW)}`;
 

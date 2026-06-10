@@ -31,13 +31,13 @@ const GN_CREDIT_DAY_KEY = (dayId) => `sentiment:credits:gn:day:${dayId}`;
 // out. Low-priority countries are still covered (every LOW_PRIORITY_DAYS) via the
 // done-set + staleness backfill, well inside NEWSDATA_MAX_PER_DAY.
 export const MAX_PER_WINDOW = 10;
-const NEWSDATA_MAX_PER_DAY = 40;
+const NEWSDATA_MAX_PER_DAY = 100;
 // GNews free tier: ~100 requests / day (no documented sub-window limit). Stay a
 // margin under the daily cap; GNEWS_MAX_PER_TICK bounds per-tick GNews work the
 // way MAX_PER_WINDOW does for NewsData, so a big backfill can't overload one tick.
-export const GNEWS_MAX_PER_DAY = 80;
-export const GNEWS_MAX_PER_TICK = 10;
-export const LOW_PRIORITY_DAYS = 3; // countries only in LOW_PRIORITY_COUNTRIES refresh at most every 3 days
+export const GNEWS_MAX_PER_DAY = 90;
+export const GNEWS_MAX_PER_TICK = 9;
+export const LOW_PRIORITY_DAYS = 2; // countries only in LOW_PRIORITY_COUNTRIES refresh at most every 3 days
 const TARGET_LOCAL_HOUR = 22; // refresh each country near 10 pm local time
 const DONE_TTL = 26 * 60 * 60; // 26 h - outlives a NewsData day so the set is whole-day
 const WINDOW_MS = 15 * 60 * 1000;
@@ -246,7 +246,10 @@ export async function persistCountries(redis, results, day) {
 export async function rebuildAggregate(redis) {
   const codes = COUNTRIES.map((c) => c.code);
   const values = await redis.mget(...codes.map(COUNTRY_KEY));
-  const data = values.filter(Boolean);
+  const data = values.filter(Boolean).map((c) => ({
+    ...c,
+    highPriority: HIGH_PRIORITY_CODES.has(c.code),
+  }));
   await redis.set(AGG_KEY, data);
   return data.length;
 }

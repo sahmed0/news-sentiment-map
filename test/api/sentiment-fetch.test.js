@@ -130,7 +130,7 @@ describe("isRetryableNetworkError", () => {
 
 // ---- HTTP request validity & happy path --------------------------------------
 
-describe("fetchCountries — request construction & scoring", () => {
+describe("fetchCountries - request construction & scoring", () => {
   it("builds the NewsData request URL and scores an English country via the multilingual model", async () => {
     const fetchFn = installFetch({
       news: newsOk([
@@ -258,7 +258,7 @@ describe("fetchCountries — request construction & scoring", () => {
 
 // ---- GNews routing (high-priority countries) ---------------------------------
 
-describe("fetchCountries — GNews routing for high-priority countries", () => {
+describe("fetchCountries - GNews routing for high-priority countries", () => {
   it("routes a high-priority country to GNews, builds the URL with the lang filter, and never calls NewsData", async () => {
     const fetchFn = installFetch({
       gnews: gnewsOk([{ title: "Big story", url: "http://us", publishedAt: "2024-01-01T10:00:00Z" }]),
@@ -340,7 +340,7 @@ describe("fetchCountries — GNews routing for high-priority countries", () => {
 
 // ---- Error handling & Retry-After --------------------------------------------
 
-describe("fetchCountries — NewsData error handling & retry", () => {
+describe("fetchCountries - NewsData error handling & retry", () => {
   it("honors Retry-After on HTTP 429, then succeeds on retry", async () => {
     vi.useFakeTimers();
     let call = 0;
@@ -436,7 +436,7 @@ describe("fetchCountries — NewsData error handling & retry", () => {
   });
 });
 
-describe("fetchCountries — HuggingFace error handling & retry", () => {
+describe("fetchCountries - HuggingFace error handling & retry", () => {
   it("honors a 503 estimated_time cold-start, then succeeds on retry", async () => {
     vi.useFakeTimers();
     let call = 0;

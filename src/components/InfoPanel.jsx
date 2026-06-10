@@ -140,7 +140,7 @@ export function InfoPanel({ open, onClose }) {
               <p>
                 Coverage is dictated by the rate limits of the GNews, NewsData.io, Hugging Face, and Microsoft Azure Translator APIs. Therefore, small island nations, microstates, and countries with very limited online press presence are not covered.
                 <br></br>
-                Additionally, the covered countries are split into high & low priority groups based on their global media presence. High priority countries are updated every day, while low priority countries are updated every 3 days.
+                Additionally, the covered countries are split into high & low priority groups based on their global media presence. High priority countries are updated every day from GNews, while low priority countries are updated every 2 days from NewsData.io.
                 Some low priority countries that are currently covered may be removed if rate limits become difficult to manage.
               </p>
             </section>

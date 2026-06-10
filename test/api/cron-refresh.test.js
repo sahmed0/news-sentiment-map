@@ -54,7 +54,7 @@ afterEach(() => {
   Redis.mockReset();
 });
 
-describe("POST /api/cron/refresh — guards", () => {
+describe("POST /api/cron/refresh - guards", () => {
   it("rejects a request without the correct Bearer CRON_SECRET", async () => {
     const res = mockRes();
     await handler({ headers: { authorization: "Bearer wrong" } }, res);
@@ -81,7 +81,7 @@ describe("POST /api/cron/refresh — guards", () => {
   });
 });
 
-describe("POST /api/cron/refresh — orchestration", () => {
+describe("POST /api/cron/refresh - orchestration", () => {
   it("runs the full pipeline and releases the lock on success", async () => {
     const redis = createFakeRedis();
     Redis.mockImplementation(function () {

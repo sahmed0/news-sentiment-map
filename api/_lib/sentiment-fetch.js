@@ -199,7 +199,7 @@ export const GNEWS_SIZE = 5; // headlines per high-priority country - matches Ne
 // ISO 639-1 code → NewsData.io / MULTILINGUAL_SUPPORTED_LANGS language name.
 // Used in fetchHeadlinesGNews to (a) decide whether to send a `lang=` filter to
 // GNews (GNews supports exactly this subset of ISO codes) and (b) tag each GNews
-// article with the English name the translate/score router expects — mirroring
+// article with the English name the translate/score router expects - mirroring
 // the format NewsData.io uses for its per-article `language` field.
 const ISO_TO_NEWSDATA_LANG = {
   "en": "english", "es": "spanish", "it": "italian", "de": "german", "fr": "french",
@@ -646,7 +646,7 @@ export async function fetchCountries(subset, stats = {}) {
   // Per-country fetch outcome, keyed by code (merged with scores in Phase 5).
   const meta = new Map();
 
-  // Phase 1: fetch headlines in two parallel batches — one per provider.
+  // Phase 1: fetch headlines in two parallel batches - one per provider.
   // Within each batch, requests are spaced by that provider's gap so its rate
   // limit is respected. The two providers share no quota, so the batches can
   // overlap freely and the wall-clock time is max(gnBatchTime, ndBatchTime)

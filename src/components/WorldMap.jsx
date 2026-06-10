@@ -45,6 +45,8 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
   const [countries, setCountries] = useState([]);
   const [paths, setPaths] = useState({}); // { numericId: svgPathString }
   const [centroids, setCentroids] = useState({}); // { numericId: [x, y] }
+  const [areas, setAreas] = useState({}); // { numericId: projectedAreaPx² }
+  const [zoomK, setZoomK] = useState(1); // current d3-zoom scale factor
   const [tooltip, setTooltip] = useState(null); // { x, y, name, score }
 
   // Re-derive the projected path strings for the SVG's current size. Pulled out
@@ -88,15 +90,18 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
 
     const computed = {};
     const computedCentroids = {};
+    const computedAreas = {};
     features.forEach((f) => {
       if (f.id == null) return;
       const id = String(f.id).padStart(3, "0");
       computed[id] = pathGen(f);
       const c = dominantCentroid(pathGen, f);
       if (!isNaN(c[0]) && !isNaN(c[1])) computedCentroids[id] = c;
+      computedAreas[id] = pathGen.area(f);
     });
     setPaths(computed);
     setCentroids(computedCentroids);
+    setAreas(computedAreas);
   }, []);
 
   // -- Load & project topojson ------------------------------------------------
@@ -146,6 +151,7 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
       .scaleExtent([1, 8])
       .on("zoom", (event) => {
         gSel.attr("transform", event.transform);
+        setZoomK(event.transform.k);
       });
 
     svgSel.call(zoomBehavior);
@@ -236,40 +242,47 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
               />
             );
           })}
-          {/* Country name labels - rendered on top of paths, zoom/pan with the map */}
-          {countries.map((f) => {
-            if (f.id == null) return null;
-            const numId = String(f.id).padStart(3, "0");
-            const alpha2 = numericToAlpha2(numId);
-            const centroid = centroids[numId];
-            if (!centroid || !alpha2) return null;
-            const name =
-              byCode[alpha2]?.name ?? isoCountries.getName(alpha2, "en");
-            if (!name) return null;
-            return (
-              <text
-                key={`label-${numId}`}
-                x={centroid[0]}
-                y={centroid[1]}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fontSize={5}
-                pointerEvents="none"
-                style={{
-                  fill: "black",
-                  stroke: "rgba(255,255,255)",
-                  strokeWidth: 0.2,
-                  paintOrder: "stroke fill",
-                  fontFamily: "sans-serif",
-                  fontWeight: 600,
-                  letterSpacing: "0.01em",
-                  userSelect: "none",
-                }}
-              >
-                {name}
-              </text>
-            );
-          })}
+          {/* Country name labels - zoom-aware: only shown when the country is
+              visually large enough (area × k² > threshold). Font size shrinks
+              with zoom so labels stay a constant visual size. */}
+          {(() => {
+            const AREA_THRESHOLD = 1500; // minimum visual area (px²) to show a label
+            return countries.map((f) => {
+              if (f.id == null) return null;
+              const numId = String(f.id).padStart(3, "0");
+              const alpha2 = numericToAlpha2(numId);
+              const centroid = centroids[numId];
+              if (!centroid || !alpha2) return null;
+              // Only render when the country is visually large enough at current zoom
+              if ((areas[numId] ?? 0) * zoomK * zoomK < AREA_THRESHOLD) return null;
+              const name =
+                byCode[alpha2]?.name ?? isoCountries.getName(alpha2, "en");
+              if (!name) return null;
+              return (
+                <text
+                  key={`label-${numId}`}
+                  x={centroid[0]}
+                  y={centroid[1]-1}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize={10 / zoomK}
+                  pointerEvents="none"
+                  style={{
+                    fill: "black",
+                    stroke: "rgba(255,255,255)",
+                    strokeWidth: 0.75 / zoomK,
+                    paintOrder: "stroke fill",
+                    fontFamily: "sans-serif",
+                    fontWeight: 600,
+                    letterSpacing: "0.01em",
+                    userSelect: "none",
+                  }}
+                >
+                  {name}
+                </text>
+              );
+            });
+          })()}
         </g>
       </svg>
 

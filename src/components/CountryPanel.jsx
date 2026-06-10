@@ -88,11 +88,11 @@ function Headlines({ articles }) {
               <p className="text-xs text-fg/50 light:text-black/70 mt-0.5">
               Cached on {" "}
                 {article.publishedAt
-                  ? new Date(article.publishedAt).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
+                  ? new Date(article.publishedAt).toLocaleDateString("en-GB", {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric"
                     })
                   : ""}
               </p>
@@ -212,9 +212,20 @@ export function CountryPanel({ country, onClose }) {
           {/* Header */}
           <div className="flex items-center justify-between px-5 pt-3 sm:pt-5 pb-3 border-b border-fg/8 shrink-0">
             <div>
-              <p className="text-xs uppercase tracking-widest opacity-60 light:opacity-65 mb-0.5">
-                Country
-              </p>
+              <div className="flex items-center gap-2 mb-0.5">
+                <p className="text-xs uppercase tracking-widest opacity-60 light:opacity-65">
+                  Country
+                </p>
+                <span
+                  className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                    country.highPriority
+                      ? "bg-blue-500/15 text-blue-400 light:bg-blue-500/20 light:text-blue-600"
+                      : "bg-fg/8 text-fg/40 light:text-black/40"
+                  }`}
+                >
+                  {country.highPriority ? "High Priority" : "Low Priority"}
+                </span>
+              </div>
               <h2 className="text-lg font-bold tracking-tight">
                 {country.name}
               </h2>

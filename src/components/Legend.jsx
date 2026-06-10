@@ -98,16 +98,16 @@ export function Legend({ data, lastUpdated, fromCache }) {
           </div>
         )}
 
-        {/* Data freshness — derived from the most recently fetched country in data. */}
+        {/* Data freshness - derived from the most recently fetched country in data. */}
         {newestFetchedAt ? (
           <p className="opacity-60 text-[11px]">
-            News as of {newestFetchedAt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+            Updated on {newestFetchedAt.toLocaleString("en-GB", { timeStyle: "short", dateStyle: "long" })} UTC
           </p>
         ) : (
           lastUpdated && (
             <p className="opacity-60 text-[11px]">
               {fromCache ? "Cached · " : "Live · "}
-              Updated {lastUpdated.toLocaleTimeString()}
+              Updated {lastUpdated.toLocaleTimeString("en-GB")}
             </p>
           )
         )}
