@@ -190,10 +190,10 @@ export const HIGH_PRIORITY_CODES = new Set(HIGH_PRIORITY_COUNTRIES.map((c) => c.
 export const CACHE_TTL = 25 * 60 * 60; // 25 hours - overlap ensures cron always refreshes before expiry
 export const NEWSDATA_DELAY_MS = 2000; // gap between consecutive requests - keeps us under NewsData.io's 1 req/sec limit (1000ms safety margin)
 export const NEWSDATA_MAX_RETRIES = 1; // retries on HTTP 429 / transient network errors before giving up on a country
-export const NEWSDATA_BACKOFF_BASE_MS = 2000; // first backoff when no Retry-After header is present
-export const GNEWS_DELAY_MS = 500; // gap between consecutive GNews requests - GNews free tier is request-count limited (no strict req/sec), so a small courtesy gap suffices
+export const NEWSDATA_BACKOFF_BASE_MS = 4000; // first backoff when no Retry-After header is present
+export const GNEWS_DELAY_MS = 2000; // gap between consecutive GNews requests - GNews free tier is request-count limited (no strict req/sec), so a small courtesy gap suffices
 export const GNEWS_MAX_RETRIES = 1; // retries on HTTP 429 / transient network errors before giving up on a country
-export const GNEWS_BACKOFF_BASE_MS = 2000; // first backoff when no Retry-After header is present
+export const GNEWS_BACKOFF_BASE_MS = 4000; // first backoff when no Retry-After header is present
 export const GNEWS_SIZE = 5; // headlines per high-priority country - matches NewsData's size=5 so cross-provider averages are comparable (free tier caps at 10)
 
 // ISO 639-1 code → NewsData.io / MULTILINGUAL_SUPPORTED_LANGS language name.
