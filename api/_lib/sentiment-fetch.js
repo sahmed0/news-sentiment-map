@@ -3,7 +3,7 @@
 import { now, since, log, debug, DEBUG } from "./logger.js";
 
 // utcOffset = standard-time offset (hours) of the country's primary population
-// centre, used to fire each country's daily refresh near 10 pm local. Half-hour
+// centre, used to fire each country's daily refresh near 6 am local. Half-hour
 // zones are rounded to the nearest hour; DST drift of +-1 h is tolerated since
 // NewsData.io's free tier already lags ~12 h, so exact timing doesn't matter.
 //
@@ -85,8 +85,6 @@ export const HIGH_PRIORITY_COUNTRIES = [
   { code: "ug", name: "Uganda", utcOffset: 3, lang: "en" },
   { code: "vn", name: "Vietnam", utcOffset: 7, lang: "vi" },
   { code: "zw", name: "Zimbabwe", utcOffset: 2, lang: "en" },
-  { code: "hk", name: "Hong Kong", utcOffset: 8, lang: "zh" },
-  { code: "sg", name: "Singapore", utcOffset: 8, lang: "en" },
 ];
 
 export const LOW_PRIORITY_COUNTRIES = [

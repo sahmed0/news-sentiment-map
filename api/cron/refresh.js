@@ -1,6 +1,6 @@
 // api/cron/refresh.js - Rolling refresh tick
 // Fired hourly by an Upstash QStash schedule (cron `0 * * * *`), the sole trigger.
-// Each tick refreshes the countries whose local time is ~10 pm now (plus stale
+// Each tick refreshes the countries whose local time is ~6 am now (plus stale
 // backfill), strictly within the NewsData.io free-tier credit budget. Auth is the
 // Bearer CRON_SECRET that QStash forwards via Upstash-Forward-Authorization.
 

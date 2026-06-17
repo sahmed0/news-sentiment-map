@@ -38,7 +38,7 @@ const NEWSDATA_MAX_PER_DAY = 100;
 export const GNEWS_MAX_PER_DAY = 90;
 export const GNEWS_MAX_PER_TICK = 5;
 export const LOW_PRIORITY_DAYS = 2; // countries only in LOW_PRIORITY_COUNTRIES refresh at most every 3 days
-const TARGET_LOCAL_HOUR = 22; // refresh each country near 10 pm local time
+const TARGET_LOCAL_HOUR = 6; // refresh each country near 6 am local time
 const DONE_TTL = 26 * 60 * 60; // 26 h - outlives a NewsData day so the set is whole-day
 const WINDOW_MS = 15 * 60 * 1000;
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -59,7 +59,7 @@ const toInt = (v) => {
 };
 
 // Choose which countries to refresh this tick:
-//   1. countries whose local time is ~ 10 pm now and aren't done today (timezone-due)
+//   1. countries whose local time is ~ 6 am now and aren't done today (timezone-due)
 //   2. then the stalest remaining not-done countries (backfill - recovers prior
 //      failures and fills empty/sparse hours without wasting budget)
 // ...selected per provider against that provider's own remaining budget (GNews

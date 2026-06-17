@@ -33,7 +33,7 @@ To stay within both while keeping ~155 countries fresh, refresh is a **rolling,
 timezone-aware tick** rather than one big sweep:
 
 - **`api/cron/refresh.js`** is the only writer. Each tick refreshes the countries
-  whose local time is ~10 pm now (which surfaces that morning's ~10 am news, given
+  whose local time is ~ 6 am now (which surfaces the previous evenings's ~ 6 pm news, given
   NewsData's ~12 h free-tier lag), plus the stalest remaining countries to use any
   spare budget and recover
   prior failures. Per-provider credit ledgers in Redis make exceeding either API's
