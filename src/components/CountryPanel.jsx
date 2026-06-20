@@ -191,7 +191,7 @@ export function CountryPanel({ country, onClose }) {
           transition={{ type: "spring", stiffness: 300, damping: 30 }}
           className={`absolute z-20 flex flex-col ${
             isMobile
-              ? "inset-x-0 bottom-0 h-[85dvh] max-h-[85dvh] rounded-t-2xl"
+              ? "inset-x-0 bottom-0 h-[85dvh] max-h-[85dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)]"
               : "top-0 right-0 h-full w-80"
           }`}
           style={{

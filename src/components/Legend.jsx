@@ -25,7 +25,7 @@ export function Legend({ data, lastUpdated, fromCache }) {
   }, null);
 
   return (
-    <div className="absolute top-2 left-3 sm:top-auto sm:bottom-2 sm:left-2 z-10">
+    <div className="absolute top-2 left-3 sm:top-auto sm:bottom-2 sm:left-2 mb-[env(safe-area-inset-bottom)] z-10">
       {/* Mobile toggle */}
       <button
         onClick={() => setOpen((o) => !o)}

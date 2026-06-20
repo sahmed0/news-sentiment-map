@@ -47,7 +47,7 @@ export default function App() {
       {/* -- Title --
           Mobile: left-aligned in a top bar, leaving room for the buttons.
           ≥sm: centered hero title as before. */}
-      <div className="hidden sm:block absolute top-3 left-4 right-24 sm:top-auto md:bottom-2 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-10 text-left sm:text-center pointer-events-none sm:py-1 sm:px-3 rounded-lg"
+      <div className="hidden sm:block absolute top-3 left-4 right-24 sm:top-auto md:bottom-2 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 mb-[env(safe-area-inset-bottom)] z-10 text-left sm:text-center pointer-events-none sm:py-1 sm:px-3 rounded-lg"
       style={{
           background: "rgb(var(--panel-rgb) / 0.85)",
           backdropFilter: "blur(12px)",
@@ -112,7 +112,7 @@ export default function App() {
           Mobile: full-width bar docked at the bottom. ≥sm: compact panel top-left. */}
       {!loading && data.length > 0 && (
         <div
-          className="absolute bottom-3 left-3 right-3 sm:left-1/3 sm:right-auto md:bottom-auto md:top-3 md:left-3 md:right-auto md:w-auto z-10 rounded-xl p-2"
+          className="absolute bottom-3 left-3 right-3 sm:left-1/3 sm:right-auto md:bottom-auto md:top-3 md:left-3 md:right-auto md:w-auto mb-[env(safe-area-inset-bottom)] z-10 rounded-xl p-2"
           style={{
             background: "rgb(var(--panel-rgb) / 0.85)",
             backdropFilter: "blur(12px)",
