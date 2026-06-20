@@ -146,7 +146,7 @@ describe("fetchCountries - request construction & scoring", () => {
     // The country's 2-letter lang (a NewsData-supported code) is passed straight
     // through as the &language= filter.
     expect(newsCall[0]).toBe(
-      "https://newsdata.io/api/1/latest?country=ly&language=ar&category=top&prioritydomain=top&sort=source&removeduplicate=1&size=5&apikey=test-news-key"
+      "https://newsdata.io/api/1/latest?country=ly&language=ar&category=top&sort=source&removeduplicate=1&size=5&apikey=test-news-key"
     );
     // English headlines are scored directly by the multilingual model; the
     // English-only model and the translator are never called.

@@ -327,7 +327,11 @@ async function fetchWithRetry(url, { tag, code, maxRetries, minGapMs, backoffBas
 async function fetchHeadlines(country) {
   const { code: countryCode, lang } = country;
   const langParam = lang && NEWSDATA_SUPPORTED_LANGS.has(lang) ? `&language=${lang}` : "";
-  const url = `https://newsdata.io/api/1/latest?country=${countryCode.toLowerCase()}${langParam}&category=top&prioritydomain=top&sort=source&removeduplicate=1&size=5&apikey=${process.env.NEWSDATA_API_KEY}`;
+  // No prioritydomain=top: it restricts results to NewsData's curated "top priority"
+  // domains, which thin-coverage countries (e.g. ne/td/cd) have none of, so the query
+  // came back empty and they never refreshed. category=top + language keep results
+  // relevant without starving low-coverage countries.
+  const url = `https://newsdata.io/api/1/latest?country=${countryCode.toLowerCase()}${langParam}&category=top&sort=source&removeduplicate=1&size=5&apikey=${process.env.NEWSDATA_API_KEY}`;
   const start = now();
   const { res, status: earlyStatus, attempts } = await fetchWithRetry(url, {
     tag: "NewsData", code: countryCode,
