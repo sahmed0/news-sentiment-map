@@ -181,8 +181,8 @@ export const LOW_PRIORITY_COUNTRIES = [
 export const COUNTRIES = [...HIGH_PRIORITY_COUNTRIES, ...LOW_PRIORITY_COUNTRIES];
 
 // O(1) tier test for the scheduler. Membership = "fetched every day"; every
-// country only in LOW_PRIORITY_COUNTRIES is refreshed at most every 3 days
-// (see LOW_PRIORITY_DAYS in refresh-core.js).
+// country only in LOW_PRIORITY_COUNTRIES is refreshed at most every
+// LOW_PRIORITY_DAYS days (see refresh-core.js), split into even per-day cohorts.
 export const HIGH_PRIORITY_CODES = new Set(HIGH_PRIORITY_COUNTRIES.map((c) => c.code));
 
 export const CACHE_TTL = 25 * 60 * 60; // 25 hours - overlap ensures cron always refreshes before expiry

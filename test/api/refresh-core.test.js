@@ -10,6 +10,7 @@ import {
   reserveCredits,
   persistCountries,
   rebuildAggregate,
+  lowPriorityDueOn,
 } from "../../api/_lib/refresh-core.js";
 import { COUNTRIES, HIGH_PRIORITY_CODES } from "../../api/_lib/sentiment-fetch.js";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
@@ -19,6 +20,12 @@ const dayIdOf = (now) => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / D
 const NOW = new Date("2024-06-01T12:30:00Z"); // hour 12 UTC - chosen so the tested countries fall to backfill, not tz-due
 const allCodes = COUNTRIES.map((c) => c.code);
 const doneKey = `sentiment:done:${dayIdOf(NOW)}`;
+
+// A low-priority country whose phase cohort is due on NOW's day-bucket. Picked
+// dynamically so the cadence tests stay valid regardless of list order/parity.
+const DUE_LOW = COUNTRIES.find(
+  (c) => !HIGH_PRIORITY_CODES.has(c.code) && lowPriorityDueOn(c.code, dayIdOf(NOW))
+).code;
 
 beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
@@ -66,12 +73,12 @@ describe("selectDueCountries", () => {
   });
 
   it("budgets the two providers independently - exhausting GNews still lets NewsData run", async () => {
-    // Only one high-priority (us, GNews) and one low-priority (ly, NewsData) pending.
-    const keep = ["us", "ly"];
+    // Only one high-priority (us, GNews) and one low-priority (DUE_LOW, NewsData) pending.
+    const keep = ["us", DUE_LOW];
     const done = allCodes.filter((c) => !keep.includes(c));
     const redis = createFakeRedis({
       sets: { [doneKey]: done },
-      zsets: { "sentiment:freshness": { ly: NOW.getTime() - (LOW_PRIORITY_DAYS + 1) * DAY_MS } },
+      zsets: { "sentiment:freshness": { [DUE_LOW]: NOW.getTime() - (LOW_PRIORITY_DAYS + 1) * DAY_MS } },
     });
     const first = await selectDueCountries(redis, NOW);
     // Both are picked, charged to their own provider.
@@ -81,7 +88,7 @@ describe("selectDueCountries", () => {
     await reserveCredits(redis, { newsdata: 0, gnews: GNEWS_MAX_PER_DAY }, first);
     const { subset, counts, diag } = await selectDueCountries(redis, NOW);
     expect(diag.gnBudget).toBe(0);
-    expect(subset.map((c) => c.code)).toEqual(["ly"]); // high-priority us is now starved, ly still runs
+    expect(subset.map((c) => c.code)).toEqual([DUE_LOW]); // high-priority us is now starved, DUE_LOW still runs
     expect(counts).toEqual({ gnews: 0, newsdata: 1 });
     subset.forEach((c) => expect(HIGH_PRIORITY_CODES.has(c.code)).toBe(false));
   });
@@ -99,25 +106,39 @@ describe("selectDueCountries", () => {
   });
 
   it("defers low-priority countries fetched within their cadence, keeps high-priority eligible", async () => {
-    const keep = ["us", "ly"]; // us = high priority, ly = low priority
+    const keep = ["us", DUE_LOW]; // us = high priority, DUE_LOW = low priority (due this day-bucket)
     const done = allCodes.filter((c) => !keep.includes(c));
 
-    // ly fetched today → inside its 3-day cadence → deferred.
+    // DUE_LOW fetched today → inside its cadence → deferred.
     const recent = createFakeRedis({
       sets: { [doneKey]: done },
-      zsets: { "sentiment:freshness": { ly: NOW.getTime() } },
+      zsets: { "sentiment:freshness": { [DUE_LOW]: NOW.getTime() } },
     });
     const a = await selectDueCountries(recent, NOW);
     expect(a.subset.map((c) => c.code)).toEqual(["us"]);
     expect(a.diag.lowDeferred).toBeGreaterThanOrEqual(1);
 
-    // ly last fetched 4 days ago → cadence elapsed → eligible again.
+    // DUE_LOW last fetched a full cadence ago → cadence elapsed → eligible again.
     const stale = createFakeRedis({
       sets: { [doneKey]: done },
-      zsets: { "sentiment:freshness": { ly: NOW.getTime() - (LOW_PRIORITY_DAYS + 1) * DAY_MS } },
+      zsets: { "sentiment:freshness": { [DUE_LOW]: NOW.getTime() - (LOW_PRIORITY_DAYS + 1) * DAY_MS } },
     });
     const b = await selectDueCountries(stale, NOW);
-    expect(b.subset.map((c) => c.code).sort()).toEqual(["ly", "us"]);
+    expect(b.subset.map((c) => c.code).sort()).toEqual([DUE_LOW, "us"].sort());
+  });
+
+  it("splits low-priority countries into even per-day cohorts across the cadence", () => {
+    const lowCodes = COUNTRIES.filter((c) => !HIGH_PRIORITY_CODES.has(c.code)).map((c) => c.code);
+
+    // Size of each phase cohort (the set due on a given day-bucket of the cadence).
+    const cohortSizes = Array.from({ length: LOW_PRIORITY_DAYS }, (_, phase) =>
+      lowCodes.filter((code) => lowPriorityDueOn(code, phase)).length
+    );
+
+    // Every low-priority country is due on exactly one day of the cadence (the
+    // cohorts partition the list), and the cohorts are balanced within ±1.
+    expect(cohortSizes.reduce((a, b) => a + b, 0)).toBe(lowCodes.length);
+    expect(Math.max(...cohortSizes) - Math.min(...cohortSizes)).toBeLessThanOrEqual(1);
   });
 });
 

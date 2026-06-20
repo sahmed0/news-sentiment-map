@@ -15,7 +15,7 @@
 // (see fetchCountries' tier routing). Each provider has its own budget below so
 // one API's usage can never throttle the other.
 
-import { COUNTRIES, HIGH_PRIORITY_CODES } from "./sentiment-fetch.js";
+import { COUNTRIES, HIGH_PRIORITY_CODES, LOW_PRIORITY_COUNTRIES } from "./sentiment-fetch.js";
 
 export const AGG_KEY = "sentiment:world";
 const COUNTRY_KEY = (code) => `sentiment:country:${code}`;
@@ -37,7 +37,7 @@ const NEWSDATA_MAX_PER_DAY = 100;
 // way MAX_PER_WINDOW does for NewsData, so a big backfill can't overload one tick.
 export const GNEWS_MAX_PER_DAY = 90;
 export const GNEWS_MAX_PER_TICK = 5;
-export const LOW_PRIORITY_DAYS = 2; // countries only in LOW_PRIORITY_COUNTRIES refresh at most every 3 days
+export const LOW_PRIORITY_DAYS = 2; // countries only in LOW_PRIORITY_COUNTRIES refresh at most every LOW_PRIORITY_DAYS days
 const TARGET_LOCAL_HOUR = 6; // refresh each country near 6 am local time
 const DONE_TTL = 26 * 60 * 60; // 26 h - outlives a NewsData day so the set is whole-day
 const WINDOW_MS = 15 * 60 * 1000;
@@ -48,6 +48,24 @@ export const NEWSDATA_DAY_OFFSET_MS = 60 * 60 * 1000;
 
 const dayId = (now) => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
 const windowId = (now) => Math.floor(now.getTime() / WINDOW_MS);
+
+// Fixed cadence phase per low-priority country: its position in the list modulo
+// LOW_PRIORITY_DAYS. Round-robin assignment partitions the low-priority countries
+// into LOW_PRIORITY_DAYS near-equal cohorts (sizes differ by at most one), so each
+// day only ~1/LOW_PRIORITY_DAYS of them are due. Without this, a cold start (where
+// every country is never-fetched and the daily NewsData budget exceeds the list
+// size) fetches them all on the same day, bunching the whole list into one cohort
+// that then refreshes together every LOW_PRIORITY_DAYS - a lopsided ~100/0 split.
+const LOW_PRIORITY_PHASE = new Map(
+  LOW_PRIORITY_COUNTRIES.map((c, i) => [c.code, i % LOW_PRIORITY_DAYS])
+);
+
+// Whether a low-priority country is in the cohort due on the given day-bucket.
+// (`%` is sign-safe here since real day-buckets are positive, but normalise anyway
+// so negative test/day values can't flip a cohort.) Exported for tests/diagnostics.
+export const lowPriorityDueOn = (code, day) =>
+  ((day % LOW_PRIORITY_DAYS) + LOW_PRIORITY_DAYS) % LOW_PRIORITY_DAYS ===
+  LOW_PRIORITY_PHASE.get(code);
 
 // UTC hour at which a country's local time is ~TARGET_LOCAL_HOUR.
 const targetUtcHour = (utcOffset) =>
@@ -102,16 +120,21 @@ export async function selectDueCountries(redis, now = new Date()) {
   const hasDevCap = Number.isFinite(devLimit) && devLimit > 0;
 
   // Tier cadence gate: a country is eligible this tick if it's high priority
-  // (daily), or low priority and its last refresh was >= LOW_PRIORITY_DAYS
-  // day-buckets ago (never-fetched => eligible). Day-buckets (not wall-clock,
-  // and aligned to the NewsData day via dayId) so within-day jitter can't drift
-  // the 3-day cadence into a 4th day.
+  // (daily), or low priority AND today is its cohort's phase day AND its last
+  // refresh was >= LOW_PRIORITY_DAYS day-buckets ago (never-fetched => eligible
+  // on its next phase day). Day-buckets (not wall-clock, and aligned to the
+  // NewsData day via dayId) so within-day jitter can't drift the cadence into an
+  // extra day. The phase gate (lowPriorityDueOn) is what keeps the per-day load
+  // even - it stops more than one cohort being eligible on the same day.
   const lastDay = (c) => {
     const last = lastFetch.get(c.code);
     return last === undefined ? -Infinity : dayId(new Date(last));
   };
-  const isEligible = (c) =>
-    HIGH_PRIORITY_CODES.has(c.code) || day - lastDay(c) >= LOW_PRIORITY_DAYS;
+  const isEligible = (c) => {
+    if (HIGH_PRIORITY_CODES.has(c.code)) return true;
+    if (!lowPriorityDueOn(c.code, day)) return false;
+    return day - lastDay(c) >= LOW_PRIORITY_DAYS;
+  };
 
   // diag: lightweight breakdown of why this tick selected what it did - logged by
   // the handler and echoed in the cron's debug response.
