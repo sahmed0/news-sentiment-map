@@ -339,7 +339,7 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
 
       {/* Zoom hint */}
       {countries.length > 0 && (
-        <p className="absolute top-15 right-4 sm:bottom-2 mb-[env(safe-area-inset-bottom)] text-[10px] opacity-60 pointer-events-none text-right">
+        <p className="absolute bottom-20 right-4 sm:bottom-2 mb-[env(safe-area-inset-bottom)] text-[10px] opacity-60 pointer-events-none text-right">
           <span className="md:hidden">Pinch to zoom · Double-tap to reset</span>
           <span className="hidden md:inline">Scroll to zoom · Double-click to reset</span>
         </p>
