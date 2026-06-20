@@ -290,7 +290,7 @@ export function parseRetryAfter(headerValue) {
 //         { res: null, status, attempts } when retries are exhausted.
 async function fetchWithRetry(url, { tag, code, maxRetries, minGapMs, backoffBaseMs }) {
   let res;
-  let attempts = 0;
+  let attempts;
   for (let attempt = 0; ; attempt++) {
     attempts = attempt + 1;
     try {
