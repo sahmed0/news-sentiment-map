@@ -42,6 +42,7 @@ const colorScale = scaleLinear()
 export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFilter = "all" }) {
   const svgRef = useRef(null);
   const gRef = useRef(null); // the <g> we apply zoom transforms to
+  const zoomBehaviorRef = useRef(null); // d3-zoom behavior, so resize can update its extent
   const [countries, setCountries] = useState([]);
   const [paths, setPaths] = useState({}); // { numericId: svgPathString }
   const [centroids, setCentroids] = useState({}); // { numericId: [x, y] }
@@ -102,6 +103,15 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
     setPaths(computed);
     setCentroids(computedCentroids);
     setAreas(computedAreas);
+
+    // Keep the pan clamp in sync with the (possibly resized) viewport. The map
+    // covers [0,0] → [width, height]; pad the extent by a full viewport on each
+    // side of those bounds (equal on all sides) so a generous drag into empty
+    // space is allowed - needed for usable dragging on narrow mobile screens.
+    zoomBehaviorRef.current?.translateExtent([
+      [-width, -height],
+      [width * 2, height * 2],
+    ]);
   }, []);
 
   // -- Load & project topojson ------------------------------------------------
@@ -147,12 +157,19 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
     const svgSel = select(svgRef.current);
     const gSel = select(gRef.current);
 
+    const { clientWidth: w, clientHeight: h } = svgRef.current;
     const zoomBehavior = zoom()
       .scaleExtent([1, 8])
+      // Clamp panning so the map (which fills [0,0] → [w,h]) can't be dragged
+      // too far off. Pad by a full viewport on each side of those bounds (equal
+      // on all sides) so a generous drag into empty space is allowed -
+      // otherwise dragging is unusable on narrow mobile screens.
+      .translateExtent([[-w, -h], [w * 2, h * 2]])
       .on("zoom", (event) => {
         gSel.attr("transform", event.transform);
         setZoomK(event.transform.k);
       });
+    zoomBehaviorRef.current = zoomBehavior;
 
     svgSel.call(zoomBehavior);
 
@@ -322,7 +339,7 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
 
       {/* Zoom hint */}
       {countries.length > 0 && (
-        <p className="absolute bottom-20 right-4 sm:bottom-2 mb-[env(safe-area-inset-bottom)] text-[10px] opacity-60 pointer-events-none text-right">
+        <p className="absolute top-15 right-4 sm:bottom-2 mb-[env(safe-area-inset-bottom)] text-[10px] opacity-60 pointer-events-none text-right">
           <span className="md:hidden">Pinch to zoom · Double-tap to reset</span>
           <span className="hidden md:inline">Scroll to zoom · Double-click to reset</span>
         </p>

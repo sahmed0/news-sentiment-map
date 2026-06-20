@@ -23,3 +23,10 @@ export function useMediaQuery(query) {
 // The 500px height mirrors the `sm`/`md` custom variants in src/index.css.
 export const useIsMobile = () =>
   useMediaQuery("(max-width: 767px), (max-height: 499px)");
+
+// Mobile + tablet ("compact"): anything below the desktop `md` layout - narrow
+// (< 1024px) OR short. On these viewports the floating chrome (title, sentiment
+// filter, legend) collapses into a single toggle-able stack at the top of the
+// screen. Keep this in sync with the `md` custom variant in src/index.css.
+export const useIsCompact = () =>
+  useMediaQuery("(max-width: 1023px), (max-height: 499px)");

@@ -12,6 +12,9 @@ export function useTheme() {
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, theme);
+    // Mirror the theme onto <html> so the theme's `--bg-rgb` cascades to
+    // html/body (their background fills the iOS safe-area below the bottom bar).
+    document.documentElement.classList.toggle("theme-light", theme === "light");
   }, [theme]);
 
   const toggle = () => setTheme((t) => (t === "dark" ? "light" : "dark"));

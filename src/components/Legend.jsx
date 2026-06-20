@@ -1,6 +1,5 @@
 // src/components/Legend.jsx
 import { useState } from "react";
-import { useIsMobile } from "../hooks/useMediaQuery";
 
 const GRADIENT_STOPS = [
   { pct: "0%", color: "#ff0000" },
@@ -8,10 +7,11 @@ const GRADIENT_STOPS = [
   { pct: "100%", color: "#00ff00" },
 ];
 
-export function Legend({ data, lastUpdated, fromCache }) {
-  const isMobile = useIsMobile();
-  // Collapsed by default on phones; expanded by default on desktop (toggleable everywhere).
-  const [open, setOpen] = useState(() => !isMobile);
+// `compact` renders the legend inline (no absolute positioning) so it can sit in
+// the mobile/tablet top stack; otherwise it floats at the desktop bottom-left.
+export function Legend({ data, lastUpdated, fromCache, compact = false }) {
+  // Collapsed by default on compact viewports; expanded on desktop (toggleable everywhere).
+  const [open, setOpen] = useState(() => !compact);
 
   const scored = data.filter((c) => c.score !== null);
   const sorted = [...scored].sort((a, b) => b.score - a.score);
@@ -25,8 +25,8 @@ export function Legend({ data, lastUpdated, fromCache }) {
   }, null);
 
   return (
-    <div className="absolute top-2 left-3 sm:top-auto sm:bottom-2 sm:left-2 mb-[env(safe-area-inset-bottom)] z-10">
-      {/* Mobile toggle */}
+    <div className={compact ? "" : "absolute bottom-2 left-2 mb-[env(safe-area-inset-bottom)] z-10"}>
+      {/* Toggle */}
       <button
         onClick={() => setOpen((o) => !o)}
         className="mb-2 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold"

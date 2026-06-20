@@ -152,9 +152,9 @@ export function InfoPanel({ open, onClose }) {
                 All results are derived from external sources. The featured headlines and sentiment scores are not representative of my personal/political views.
               </p>
             </section>
-          </div>
-          {/* Footer */}
-            <div className="flex items-center justify-evenly p-4 shrink-0">
+
+            {/* Footer */}
+            <section className="flex items-center justify-evenly p-4 shrink-0">
               <a
               href="https://sajidahmed.co.uk"
               target="_blank"
@@ -175,7 +175,9 @@ export function InfoPanel({ open, onClose }) {
                 <p className="text-sm text-fg/95 light:text-black/75">
                   © 2026 Sajid Ahmed
                 </p>
-            </div>
+            </section>
+          </div>
+
         </motion.div>
       )}
     </AnimatePresence>
