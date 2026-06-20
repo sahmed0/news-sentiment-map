@@ -7,38 +7,16 @@ import { SentimentFilter } from "./components/SentimentFilter";
 import { sentimentBucket } from "./lib/sentiment";
 import { useSentimentData } from "./hooks/useSentimentData";
 import { useTheme } from "./hooks/useTheme";
-import { useIsCompact } from "./hooks/useMediaQuery";
 import { Sun, Moon, Info } from 'lucide-react';
 import { InfoPanel } from "./components/InfoPanel";
-
-// Collapsible toggle pill used by the compact (mobile/tablet) top stack.
-function Toggle({ open, onClick, label, style }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-expanded={open}
-      className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold"
-      style={style}
-    >
-      <span style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>
-        ▸
-      </span>
-      {label}
-    </button>
-  );
-}
 
 export default function App() {
   const { byCode, data, loading, error, lastUpdated, fromCache } =
     useSentimentData();
   const { theme, toggle: toggleTheme } = useTheme();
-  const isCompact = useIsCompact();
   const [selectedCountry, setSelectedCountry] = useState(null);
   const [sentimentFilter, setSentimentFilter] = useState("all");
   const [showInfo, setShowInfo] = useState(false);
-  // Mobile/tablet only: each piece of floating chrome is independently shown/hidden.
-  const [showTitle, setShowTitle] = useState(false);
-  const [showFilter, setShowFilter] = useState(true);
 
   // Country counts per sentiment bucket for the map filter ("all" = all scored).
   const sentimentCounts = useMemo(() => {
@@ -59,14 +37,6 @@ export default function App() {
     color: "rgb(var(--fg-rgb) / 0.7)",
   };
 
-  // Frosted-glass surface shared by the floating panels and the compact toggles.
-  const panelStyle = {
-    background: "rgb(var(--panel-rgb) / 0.85)",
-    backdropFilter: "blur(12px)",
-    border: "1px solid rgb(var(--fg-rgb) / 0.08)",
-  };
-  const pillStyle = { ...panelStyle, color: "rgb(var(--fg-rgb) / 0.7)" };
-
   return (
     <div
       className={`relative w-full h-full overflow-hidden transition-colors duration-300 ${
@@ -74,24 +44,27 @@ export default function App() {
       }`}
       style={{ background: "rgb(var(--bg-rgb))", color: "rgb(var(--fg-rgb))" }}
     >
-      {/* -- Title (desktop) --
-          Centered hero title pinned to the bottom. On mobile/tablet the title
-          lives in the compact top stack below instead. */}
-      {!isCompact && (
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 mb-[env(safe-area-inset-bottom)] z-10 text-center pointer-events-none py-1 px-3 rounded-lg"
-        style={{ ...panelStyle, color: "rgb(var(--fg-rgb))" }}
-          >
-          <h1
-            className="text-2xl font-black tracking-tight truncate"
-            style={{ fontFamily: "'DM Serif Display', serif", letterSpacing: "-0.02em" }}
-          >
-            World News Sentiment
-          </h1>
-          <p className="text-xs opacity-60 mt-0.5 tracking-wide uppercase">
-            Emotional temperature of global headlines
-          </p>
-        </div>
-      )}
+      {/* -- Title --
+          Mobile: left-aligned in a top bar, leaving room for the buttons.
+          ≥sm: centered hero title as before. */}
+      <div className="hidden sm:block absolute top-3 left-4 right-24 sm:top-auto md:bottom-2 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 mb-[env(safe-area-inset-bottom)] z-10 text-left sm:text-center pointer-events-none sm:py-1 sm:px-3 rounded-lg"
+      style={{
+          background: "rgb(var(--panel-rgb) / 0.85)",
+          backdropFilter: "blur(12px)",
+          border: "1px solid rgb(var(--fg-rgb) / 0.08)",
+          color: "rgb(var(--fg-rgb))",
+        }}
+        >
+        <h1
+          className="text-lg sm:text-2xl font-black tracking-tight truncate"
+          style={{ fontFamily: "'DM Serif Display', serif", letterSpacing: "-0.02em" }}
+        >
+          World News Sentiment
+        </h1>
+        <p className="hidden sm:block text-xs opacity-60 mt-0.5 tracking-wide uppercase">
+          Emotional temperature of global headlines
+        </p>
+      </div>
 
       {/* -- Top-right controls: theme toggle + info -- */}
       <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
@@ -135,13 +108,16 @@ export default function App() {
         </div>
       )}
 
-      {/* -- Map sentiment filter (desktop) --
-          Compact panel pinned top-left. On mobile/tablet it lives in the
-          toggle-able top stack below. */}
-      {!isCompact && !loading && data.length > 0 && (
+      {/* -- Map sentiment filter --
+          Mobile: full-width bar docked at the bottom. ≥sm: compact panel top-left. */}
+      {!loading && data.length > 0 && (
         <div
-          className="absolute top-3 left-3 z-10 rounded-xl p-2"
-          style={panelStyle}
+          className="absolute bottom-3 left-3 right-3 sm:left-1/3 sm:right-auto md:bottom-auto md:top-3 md:left-3 md:right-auto md:w-auto mb-[env(safe-area-inset-bottom)] z-10 rounded-xl p-2"
+          style={{
+            background: "rgb(var(--panel-rgb) / 0.85)",
+            backdropFilter: "blur(12px)",
+            border: "1px solid rgb(var(--fg-rgb) / 0.08)",
+          }}
         >
           <p className="text-[10px] uppercase tracking-widest opacity-40 light:opacity-65 mb-1.5 px-1">
             Filter by sentiment
@@ -151,53 +127,6 @@ export default function App() {
             onChange={setSentimentFilter}
             counts={sentimentCounts}
           />
-        </div>
-      )}
-
-      {/* -- Compact (mobile/tablet) top stack --
-          Title, sentiment filter, and legend collapse into independently
-          toggle-able panels stacked at the top of the screen. */}
-      {isCompact && !loading && (
-        <div className="absolute top-2 left-3 z-10 flex flex-col items-start gap-2 max-w-[min(18rem,calc(100vw-5.5rem))]">
-          {/* Title */}
-          <Toggle open={showTitle} onClick={() => setShowTitle((v) => !v)} label="Title" style={pillStyle} />
-          {showTitle && (
-            <div className="rounded-lg py-1.5 px-3" style={{ ...panelStyle, color: "rgb(var(--fg-rgb))" }}>
-              <h1
-                className="text-lg font-black tracking-tight"
-                style={{ fontFamily: "'DM Serif Display', serif", letterSpacing: "-0.02em" }}
-              >
-                World News Sentiment
-              </h1>
-              <p className="text-[11px] opacity-60 mt-0.5 tracking-wide uppercase">
-                Emotional temperature of global headlines
-              </p>
-            </div>
-          )}
-
-          {/* Sentiment filter */}
-          {data.length > 0 && (
-            <>
-              <Toggle open={showFilter} onClick={() => setShowFilter((v) => !v)} label="Filter by sentiment" style={pillStyle} />
-              {showFilter && (
-                <div className="rounded-xl p-2 w-full" style={panelStyle}>
-                  <SentimentFilter
-                    value={sentimentFilter}
-                    onChange={setSentimentFilter}
-                    counts={sentimentCounts}
-                  />
-                </div>
-              )}
-
-              {/* Legend & rankings (self-toggling) */}
-              <Legend
-                data={data}
-                lastUpdated={lastUpdated}
-                fromCache={fromCache}
-                compact
-              />
-            </>
-          )}
         </div>
       )}
 
@@ -227,8 +156,8 @@ export default function App() {
         <InfoPanel open={showInfo} onClose={() => setShowInfo(false)} />
       </div>
 
-      {/* -- Legend + leaderboard (desktop; compact version lives in the top stack) -- */}
-      {!isCompact && !loading && data.length > 0 && (
+      {/* -- Legend + leaderboard -- */}
+      {!loading && data.length > 0 && (
         <Legend
           data={data}
           lastUpdated={lastUpdated}
