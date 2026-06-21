@@ -8,7 +8,7 @@ import { now, since, log, debug, DEBUG } from "./logger.js";
 // NewsData.io's free tier already lags ~12 h, so exact timing doesn't matter.
 //
 // lang = the country's primary news language as a lowercase English name, in the
-// SAME vocabulary NewsData.io reports (see MULTILINGUAL_SUPPORTED_LANGS). High-
+// SAME vocabulary NewsData.io reports (e.g. "english", "german"). High-
 // priority countries are fetched from GNews, whose top-headlines response carries
 // NO per-article language, so we tag every GNews headline with this value to drive
 // the same translate/score routing NewsData's per-article language drives. Azure
@@ -187,14 +187,14 @@ export const HIGH_PRIORITY_CODES = new Set(HIGH_PRIORITY_COUNTRIES.map((c) => c.
 
 export const CACHE_TTL = 25 * 60 * 60; // 25 hours - overlap ensures cron always refreshes before expiry
 export const NEWSDATA_DELAY_MS = 2000; // gap between consecutive requests - keeps us under NewsData.io's 1 req/sec limit (1000ms safety margin)
-export const NEWSDATA_MAX_RETRIES = 1; // retries on HTTP 429 / transient network errors before giving up on a country
-export const NEWSDATA_BACKOFF_BASE_MS = 4000; // first backoff when no Retry-After header is present
+export const NEWSDATA_MAX_RETRIES = 2; // retries on HTTP 429 / transient network errors before giving up on a country
+export const NEWSDATA_BACKOFF_BASE_MS = 6000; // first backoff when no Retry-After header is present
 export const GNEWS_DELAY_MS = 2000; // gap between consecutive GNews requests - GNews free tier is request-count limited (no strict req/sec), so a small courtesy gap suffices
-export const GNEWS_MAX_RETRIES = 1; // retries on HTTP 429 / transient network errors before giving up on a country
-export const GNEWS_BACKOFF_BASE_MS = 4000; // first backoff when no Retry-After header is present
+export const GNEWS_MAX_RETRIES = 2; // retries on HTTP 429 / transient network errors before giving up on a country
+export const GNEWS_BACKOFF_BASE_MS = 6000; // first backoff when no Retry-After header is present
 export const GNEWS_SIZE = 5; // headlines per high-priority country - matches NewsData's size=5 so cross-provider averages are comparable (free tier caps at 10)
 
-// ISO 639-1 code → NewsData.io / MULTILINGUAL_SUPPORTED_LANGS language name.
+// ISO 639-1 code → NewsData.io language name (lowercase English).
 // Used in fetchHeadlinesGNews to (a) decide whether to send a `lang=` filter to
 // GNews (GNews supports exactly this subset of ISO codes) and (b) tag each GNews
 // article with the English name the translate/score router expects - mirroring
@@ -218,10 +218,10 @@ const NEWSDATA_SUPPORTED_LANGS = new Set([
   "bg", "vi", "bn", "fa", "hr", "da", "et", "lv", "lt", "sk", "sl", "sq", "sr",
   "bs", "mk", "my", "hy", "az", "ne", "ur", "fi", "mn", "ka", "km", "lo", "uz",
 ]);
-export const FETCH_TIMEOUT_MS = 12000; // abort any single external request that hangs, so one stuck connection can't stall the whole tick
-export const HF_MAX_RETRIES = 1; // retries on HF 503 (model loading) / 429 / transient network errors before nulling a batch
-export const HF_BACKOFF_BASE_MS = 2000; // first backoff when no Retry-After / estimated_time is present
-export const HF_MAX_BACKOFF_MS = 20000; // cap a single HF wait (a cold-start estimated_time can be large) so a tick can't stall
+export const FETCH_TIMEOUT_MS = 60000; // abort any single external request that hangs, so one stuck connection can't stall the whole tick
+export const HF_MAX_RETRIES = 2; // retries on HF 503 (model loading) / 429 / transient network errors before nulling a batch
+export const HF_BACKOFF_BASE_MS = 6000; // first backoff when no Retry-After / estimated_time is present
+export const HF_MAX_BACKOFF_MS = 30000; // cap a single HF wait (a cold-start estimated_time can be large) so a tick can't stall
 
 // Transient connection-layer failures thrown by undici (Node's fetch) - the
 // request never reached an HTTP response, so a quick retry often succeeds.
@@ -245,22 +245,12 @@ export function isRetryableNetworkError(err) {
 const AZURE_BATCH_SIZE = 100;           // Azure Translator max documents per request
 const HF_BATCH_SIZE = 50;               // headlines per HuggingFace request - keeps payloads small
 
-// Languages natively supported by cardiffnlp/twitter-xlm-roberta-base-sentiment.
-// NewsData.io reports language as a full lowercase English name ("german",
-// "english"), NOT a 2-letter code - match those names or every country falls
-// through to the Azure-translate path.
-const MULTILINGUAL_SUPPORTED_LANGS = new Set([
-  "arabic", "english", "french", "german", "hindi", "italian", "portuguese", "spanish",
-]);
-
 const HF_ENGLISH_MODEL =
   "https://router.huggingface.co/hf-inference/models/cardiffnlp/twitter-roberta-base-sentiment-latest";
-const HF_MULTILINGUAL_MODEL =
-  "https://router.huggingface.co/hf-inference/models/cardiffnlp/twitter-xlm-roberta-base-sentiment";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Last path segment of a HF model URL, for terse log lines (e.g. "twitter-xlm-roberta-base-sentiment").
+// Last path segment of a HF model URL, for terse log lines (e.g. "twitter-roberta-base-sentiment-latest").
 const modelShortName = (url) => url.split("/").pop();
 
 // Normalize a provider timestamp to an ISO string, or null if missing/unparseable.
@@ -434,9 +424,9 @@ async function fetchHeadlinesGNews(country) {
       title: a.title,
       url: a.url,
       publishedAt: toIsoOrNull(a.publishedAt),
-      // Convert ISO code to the English name MULTILINGUAL_SUPPORTED_LANGS and the
-      // "english" routing guard expect. Falls back to the ISO code for unmapped
-      // languages (they route to the translate path, which is correct).
+      // Convert ISO code to the English name the "english" routing guard expects.
+      // Falls back to the ISO code for unmapped languages (they route to the
+      // translate path, which is correct).
       language: ISO_TO_NEWSDATA_LANG[lang] ?? lang,
     });
   }
@@ -683,27 +673,25 @@ export async function fetchCountries(subset, stats = {}) {
   const fetched = [...gnFetched, ...ndFetched];
   const fetchMs = since(tFetch);
 
-  // Phase 2: flatten to individual headlines, routed by EACH headline's own
-  // language (not the country's dominant one). Each ref carries code + article
-  // index so scores and translations can be written back to the right article.
-  //   - supported language (incl. english) → scored on the original text
-  //   - other language                     → scored on its English translation
-  //   - any non-English headline           → translated for display regardless
-  const multiItems = []; // scored directly by the multilingual model
-  const transItems = []; // scored by the English model, on the translation
-  const toTranslate = []; // every non-English headline (display + trans-scoring)
+  // Phase 2: flatten to individual headlines, all scored by the English model.
+  // Each ref carries code + article index so scores and translations can be
+  // written back to the right article.
+  //   - english headline     → scored on its original text, no translation
+  //   - any other language    → translated (for display AND scoring), then the
+  //                             English model scores that translation
+  const scoreItems = []; // every titled headline, scored by the English model
+  const toTranslate = []; // every non-English headline (display + scoring input)
   for (const country of fetched) {
     country.articles.forEach((a, idx) => {
       if (!a.title) return;
-      const ref = { code: country.code, idx, title: a.title };
-      if (MULTILINGUAL_SUPPORTED_LANGS.has(a.language)) multiItems.push(ref);
-      else transItems.push(ref);
+      const ref = { code: country.code, idx, title: a.title, language: a.language };
+      scoreItems.push(ref);
       if (a.language !== "english") toTranslate.push(ref);
     });
   }
 
   // Phase 3a: translate every non-English headline once. The English text is
-  // reused both for display and for scoring the non-multilingual headlines.
+  // reused both for display and as the scoring input for that headline.
   const tTranslate = now();
   const translations = toTranslate.length
     ? await translateAll(toTranslate.map((it) => it.title))
@@ -712,23 +700,22 @@ export async function fetchCountries(subset, stats = {}) {
   const translationByRef = new Map();
   toTranslate.forEach((ref, i) => translationByRef.set(ref, translations[i] || null));
 
-  // Phase 3b: score every headline individually (multilingual + English in parallel)
+  // Phase 3b: score every headline with the English model. English headlines are
+  // scored on their original title; non-English on their translation. A failed or
+  // missing translation becomes "" so batchSentimentModel skips it and yields null.
   const tScore = now();
-  const [multiScores, transScores] = await Promise.all([
-    multiItems.length
-      ? scoreInChunks(HF_MULTILINGUAL_MODEL, multiItems.map((it) => it.title))
-      : Promise.resolve([]),
-    transItems.length
-      ? scoreInChunks(HF_ENGLISH_MODEL, transItems.map((it) => translationByRef.get(it) || ""))
-      : Promise.resolve([]),
-  ]);
+  const inputs = scoreItems.map((it) =>
+    it.language === "english" ? it.title : (translationByRef.get(it) || "")
+  );
+  const scores = scoreItems.length
+    ? await scoreInChunks(HF_ENGLISH_MODEL, inputs)
+    : [];
   const scoreMs = since(tScore);
 
   // Phase 4: write scores + English translations back onto each article (null until set)
   const articleScores = new Map(fetched.map((c) => [c.code, c.articles.map(() => null)]));
   const articleTrans = new Map(fetched.map((c) => [c.code, c.articles.map(() => null)]));
-  multiItems.forEach((it, i) => { articleScores.get(it.code)[it.idx] = multiScores[i] ?? null; });
-  transItems.forEach((it, i) => { articleScores.get(it.code)[it.idx] = transScores[i] ?? null; });
+  scoreItems.forEach((it, i) => { articleScores.get(it.code)[it.idx] = scores[i] ?? null; });
   toTranslate.forEach((it) => { articleTrans.get(it.code)[it.idx] = translationByRef.get(it); });
 
   // Phase 5: country score = average of its headlines' scores (ignoring nulls)
@@ -771,15 +758,16 @@ export async function fetchCountries(subset, stats = {}) {
   });
 
   // Fill the caller-supplied stats object (used by the cron's debug response).
-  const nullScores =
-    multiScores.filter((s) => s === null).length + transScores.filter((s) => s === null).length;
+  const englishScored = scoreItems.filter((it) => it.language === "english").length;
+  const translatedScored = scoreItems.length - englishScored;
+  const nullScores = scores.filter((s) => s === null).length;
   stats.timings = { fetchMs, translateMs, scoreMs, totalMs: since(t0) };
   stats.counts = {
     countries: subset.length,
-    headlines: multiItems.length + transItems.length,
+    headlines: scoreItems.length,
     toTranslate: toTranslate.length,
-    multiScored: multiItems.length,
-    transScored: transItems.length,
+    englishScored,
+    translatedScored,
     nullScores,
   };
   stats.countries = perCountry;

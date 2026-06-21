@@ -22,6 +22,9 @@ function makeResponse(status, body, headers = {}) {
 }
 
 // Route fetch by URL to per-endpoint handlers (static response or fn(url, opts)).
+// The multilingual model was removed from the pipeline; its `hfMulti` route is
+// kept (left unconfigured by every test) purely as a tripwire - if the code ever
+// hits the multilingual URL again, `resolve` throws "no handler configured".
 function installFetch({ news, gnews, hfMulti, hfEng, azure } = {}) {
   const resolve = (h, url, opts) => {
     if (h == null) throw new Error("no handler configured for: " + url);
@@ -131,12 +134,12 @@ describe("isRetryableNetworkError", () => {
 // ---- HTTP request validity & happy path --------------------------------------
 
 describe("fetchCountries - request construction & scoring", () => {
-  it("builds the NewsData request URL and scores an English country via the multilingual model", async () => {
+  it("builds the NewsData request URL and scores an English country via the English model on the original title", async () => {
     const fetchFn = installFetch({
       news: newsOk([
         { title: "Good news", link: "http://a", pubDate: "2024-01-01 10:00:00", language: "english" },
       ]),
-      hfMulti: hfPositive,
+      hfEng: hfPositive,
     });
 
     const stats = {};
@@ -146,13 +149,17 @@ describe("fetchCountries - request construction & scoring", () => {
     // The country's 2-letter lang (a NewsData-supported code) is passed straight
     // through as the &language= filter.
     expect(newsCall[0]).toBe(
-      "https://newsdata.io/api/1/latest?country=ly&language=ar&category=top&sort=source&removeduplicate=1&size=5&apikey=test-news-key"
+      "https://newsdata.io/api/1/latest?country=ly&language=ar&sort=source&removeduplicate=1&size=5&apikey=test-news-key"
     );
-    // English headlines are scored directly by the multilingual model; the
-    // English-only model and the translator are never called.
-    expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-xlm-roberta"))).toBe(true);
-    expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-roberta-base-sentiment-latest"))).toBe(false);
+    // English headlines are scored by the English model on their original text;
+    // the multilingual model and the translator are never called.
+    expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-roberta-base-sentiment-latest"))).toBe(true);
+    expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-xlm-roberta"))).toBe(false);
     expect(fetchFn.mock.calls.some(([u]) => u.includes("microsofttranslator"))).toBe(false);
+
+    // The English model receives the untranslated original title.
+    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"));
+    expect(JSON.parse(hfCall[1].body).inputs[0]).toBe("Good news");
 
     expect(results).toHaveLength(1);
     expect(results[0].code).toBe("ly");
@@ -162,13 +169,15 @@ describe("fetchCountries - request construction & scoring", () => {
     expect(typeof results[0].fetchedAt).toBe("string");
     expect(Number.isNaN(Date.parse(results[0].fetchedAt))).toBe(false);
 
-    expect(stats.counts).toMatchObject({ countries: 1, headlines: 1, multiScored: 1, transScored: 0, toTranslate: 0 });
+    expect(stats.counts).toMatchObject({
+      countries: 1, headlines: 1, englishScored: 1, translatedScored: 0, toTranslate: 0, nullScores: 0,
+    });
   });
 
   it("omits the NewsData language filter for a lang code NewsData doesn't support", async () => {
     const fetchFn = installFetch({
       news: newsOk([{ title: "Hi", link: "http://a", pubDate: null, language: "english" }]),
-      hfMulti: hfPositive,
+      hfEng: hfPositive,
     });
     // "kz" is not a NewsData-supported code -> fall back to the country filter alone.
     await fetchCountries([{ code: "kz", name: "Kazakhstan", lang: "kz" }]);
@@ -179,10 +188,10 @@ describe("fetchCountries - request construction & scoring", () => {
   it("sends the HF request with parameters.top_k = null", async () => {
     const fetchFn = installFetch({
       news: newsOk([{ title: "Hi", link: "http://a", pubDate: null, language: "english" }]),
-      hfMulti: hfPositive,
+      hfEng: hfPositive,
     });
     await fetchCountries([{ code: "ly", name: "Libya" }]);
-    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-xlm-roberta"));
+    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"));
     const body = JSON.parse(hfCall[1].body);
     expect(body.parameters).toEqual({ top_k: null });
     expect(hfCall[1].headers.Authorization).toBe("Bearer test-hf-key");
@@ -211,17 +220,21 @@ describe("fetchCountries - request construction & scoring", () => {
     expect(results[0].score).toBeCloseTo(0.8, 5);
   });
 
-  it("scores a supported non-English language with the multilingual model but still translates it for display", async () => {
+  it("scores a formerly-multilingual language (German) with the English model on its translation", async () => {
     const fetchFn = installFetch({
       news: newsOk([{ title: "Guten Tag", link: "http://de", pubDate: null, language: "german" }]),
-      hfMulti: hfPositive,
+      hfEng: hfPositive,
       azure: azureEcho,
     });
 
     const results = await fetchCountries([{ code: "ly", name: "Libya" }]);
 
-    expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-xlm-roberta"))).toBe(true); // scored by multilingual
-    expect(fetchFn.mock.calls.some(([u]) => u.includes("microsofttranslator"))).toBe(true); // translated for display
+    // German is no longer scored natively: it is translated and the English model
+    // scores that translation. The multilingual model is never called.
+    expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-xlm-roberta"))).toBe(false);
+    expect(fetchFn.mock.calls.some(([u]) => u.includes("microsofttranslator"))).toBe(true); // translated for display + scoring
+    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"));
+    expect(JSON.parse(hfCall[1].body).inputs[0]).toBe("EN:Guten Tag");
     expect(results[0].articles[0].translatedTitle).toBe("EN:Guten Tag");
     expect(results[0].score).toBeCloseTo(0.8, 5);
   });
@@ -233,12 +246,12 @@ describe("fetchCountries - request construction & scoring", () => {
         { title: "A again", link: "http://dup", language: "english" }, // same link → dropped
         { title: "B", link: "http://b", language: "english" },
       ]),
-      hfMulti: hfPositive,
+      hfEng: hfPositive,
     });
 
     const results = await fetchCountries([{ code: "ly", name: "Libya" }]);
     expect(results[0].articles).toHaveLength(2);
-    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-xlm-roberta"));
+    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"));
     expect(JSON.parse(hfCall[1].body).inputs).toHaveLength(2);
   });
 
@@ -246,7 +259,7 @@ describe("fetchCountries - request construction & scoring", () => {
     installFetch({
       news: newsOk([{ title: "Solo", link: "http://a", language: "english" }]),
       // One headline → return the flat single-input shape the HF router uses.
-      hfMulti: makeResponse(200, [
+      hfEng: makeResponse(200, [
         { label: "positive", score: 0.7 },
         { label: "negative", score: 0.1 },
       ]),
@@ -262,7 +275,7 @@ describe("fetchCountries - GNews routing for high-priority countries", () => {
   it("routes a high-priority country to GNews, builds the URL with the lang filter, and never calls NewsData", async () => {
     const fetchFn = installFetch({
       gnews: gnewsOk([{ title: "Big story", url: "http://us", publishedAt: "2024-01-01T10:00:00Z" }]),
-      hfMulti: hfPositive,
+      hfEng: hfPositive,
     });
 
     const results = await fetchCountries([{ code: "us", name: "United States", lang: "en" }]);
@@ -273,18 +286,20 @@ describe("fetchCountries - GNews routing for high-priority countries", () => {
     );
     // High-priority → GNews only; NewsData is never touched.
     expect(fetchFn.mock.calls.some(([u]) => u.startsWith("https://newsdata.io/"))).toBe(false);
-    // English headline → scored directly by the multilingual model, no translation.
-    expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-xlm-roberta"))).toBe(true);
+    // English headline → scored on the original text by the English model, no
+    // translation; the multilingual model is never called.
+    expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-roberta-base-sentiment-latest"))).toBe(true);
+    expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-xlm-roberta"))).toBe(false);
     expect(fetchFn.mock.calls.some(([u]) => u.includes("microsofttranslator"))).toBe(false);
     expect(results[0].code).toBe("us");
     expect(results[0].score).toBeCloseTo(0.8, 5);
     expect(results[0].articles[0].url).toBe("http://us");
   });
 
-  it("tags GNews headlines (no per-article language) with the country's lang, then scores+translates a supported language", async () => {
+  it("tags GNews headlines (no per-article language) with the country's lang, then translates and scores German via the English model", async () => {
     const fetchFn = installFetch({
       gnews: gnewsOk([{ title: "Guten Tag", url: "http://de", publishedAt: null }]),
-      hfMulti: hfPositive,
+      hfEng: hfPositive,
       azure: azureEcho,
     });
 
@@ -293,10 +308,12 @@ describe("fetchCountries - GNews routing for high-priority countries", () => {
     const gnewsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://gnews.io/"));
     expect(gnewsCall[0]).toContain("country=de");
     expect(gnewsCall[0]).toContain("lang=de");
-    // German is multilingual-supported → scored by the multilingual model, and
-    // still translated for display.
-    expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-xlm-roberta"))).toBe(true);
+    // German is translated, then the English model scores the translation; the
+    // multilingual model is never called.
+    expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-xlm-roberta"))).toBe(false);
     expect(fetchFn.mock.calls.some(([u]) => u.includes("microsofttranslator"))).toBe(true);
+    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"));
+    expect(JSON.parse(hfCall[1].body).inputs[0]).toBe("EN:Guten Tag");
     expect(results[0].articles[0].language).toBe("german"); // tagged from the country
     expect(results[0].articles[0].translatedTitle).toBe("EN:Guten Tag");
     expect(results[0].score).toBeCloseTo(0.8, 5);
@@ -314,9 +331,10 @@ describe("fetchCountries - GNews routing for high-priority countries", () => {
     const gnewsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://gnews.io/"));
     expect(gnewsCall[0]).toContain("country=tr");
     expect(gnewsCall[0]).not.toContain("lang="); // turkish has no GNews lang code
-    // Turkish is not multilingual-supported → translated, then scored by English model.
+    // Non-English → translated, then scored by the English model; no multilingual call.
     expect(fetchFn.mock.calls.some(([u]) => u.includes("microsofttranslator"))).toBe(true);
     expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-roberta-base-sentiment-latest"))).toBe(true);
+    expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-xlm-roberta"))).toBe(false);
     expect(results[0].articles[0].translatedTitle).toBe("EN:Merhaba");
     expect(results[0].score).toBeCloseTo(0.8, 5);
   });
@@ -351,7 +369,7 @@ describe("fetchCountries - NewsData error handling & retry", () => {
           ? makeResponse(429, { error: "rate" }, { "retry-after": "1" })
           : newsOk([{ title: "OK", link: "http://a", language: "english" }]);
       },
-      hfMulti: hfPositive,
+      hfEng: hfPositive,
     });
 
     const promise = fetchCountries([{ code: "ly", name: "Libya" }]);
@@ -390,7 +408,7 @@ describe("fetchCountries - NewsData error handling & retry", () => {
         if (call === 1) throw netError("ECONNRESET");
         return newsOk([{ title: "Back", link: "http://a", language: "english" }]);
       },
-      hfMulti: hfPositive,
+      hfEng: hfPositive,
     });
 
     const promise = fetchCountries([{ code: "ly", name: "Libya" }]);
@@ -418,7 +436,7 @@ describe("fetchCountries - NewsData error handling & retry", () => {
         if (url.includes("country=ly")) throw new Error("boom-non-retryable");
         return newsOk([{ title: "Fine", link: "http://dz", language: "english" }]);
       },
-      hfMulti: hfPositive,
+      hfEng: hfPositive,
     });
 
     const promise = fetchCountries([
@@ -442,7 +460,7 @@ describe("fetchCountries - HuggingFace error handling & retry", () => {
     let call = 0;
     const fetchFn = installFetch({
       news: newsOk([{ title: "Hi", link: "http://a", language: "english" }]),
-      hfMulti: (url, opts) => {
+      hfEng: (url, opts) => {
         call += 1;
         return call === 1 ? makeResponse(503, { estimated_time: 3 }) : hfPositive(url, opts);
       },
@@ -452,14 +470,14 @@ describe("fetchCountries - HuggingFace error handling & retry", () => {
     await vi.advanceTimersByTimeAsync(120000);
     const results = await promise;
 
-    expect(fetchFn.mock.calls.filter(([u]) => u.includes("twitter-xlm-roberta"))).toHaveLength(2);
+    expect(fetchFn.mock.calls.filter(([u]) => u.includes("twitter-roberta-base-sentiment-latest"))).toHaveLength(2);
     expect(results[0].score).toBeCloseTo(0.8, 5);
   });
 
   it("degrades to null scores (no throw) on an invalid HF JSON response", async () => {
     installFetch({
       news: newsOk([{ title: "Hi", link: "http://a", language: "english" }]),
-      hfMulti: makeResponse(200, "<<not json>>"),
+      hfEng: makeResponse(200, "<<not json>>"),
     });
     const results = await fetchCountries([{ code: "ly", name: "Libya" }]);
     expect(results[0].articles).toHaveLength(1);

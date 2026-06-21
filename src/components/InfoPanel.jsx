@@ -111,7 +111,7 @@ export function InfoPanel({ open, onClose }) {
                 >
                   Microsoft Azure Translator
                 </a>
-                {" "} before scoring. Scoring is done by a fine-tuned multilingual sentiment model. Results are fetched around 10:00 PM local time for each country and cached in Redis. A Vercel serverless function is triggered to fetch the cached results from the Redis database every time the user opens or refreshes the website.
+                {" "} before scoring. Scoring is done by a fine-tuned sentiment model. Results are fetched around 6 A.M. local time for each country and cached in Redis. A Vercel serverless function is triggered to fetch the cached results from the Redis database every time the user opens or refreshes the website.
               </p>
             </section>
 
@@ -122,14 +122,14 @@ export function InfoPanel({ open, onClose }) {
               <p>
                 Each headline is scored by a fine-tuned{" "}
                 <a
-                  href="https://huggingface.co/cardiffnlp/twitter-xlm-roberta-base-sentiment"
+                  href="https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-fg/95 light:text-black underline underline-offset-2 hover:opacity-70 transition-opacity"
                 >
                   cardiffnlp RoBERTa model
                 </a>{" "}
-                (multilingual for Arabic, French, German, Hindi, Italian, Portuguese, and Spanish; English-optimised for all others). The model is trained on 198 million tweets across 8 languages, and is excellent at identifying sentiment in short multilingual text. Scores range from -1 (most negative) to +1 (most positive), with a ±0.1 neutral zone. A country's displayed score is the average across its scored headlines.
+                The model is trained on 124 million tweets in the English language, and is excellent at identifying sentiment in short text snippets. Scores range from -1 (most negative) to +1 (most positive), with a ±0.1 neutral zone. A country's displayed score is the average across its scored headlines.
               </p>
             </section>
 
