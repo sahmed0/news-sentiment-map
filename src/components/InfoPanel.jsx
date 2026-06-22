@@ -111,7 +111,7 @@ export function InfoPanel({ open, onClose }) {
                 >
                   Microsoft Azure Translator
                 </a>
-                {" "} before scoring. Scoring is done by a fine-tuned sentiment model. Results are fetched around 6 A.M. local time for each country and cached in Redis. A Vercel serverless function is triggered to fetch the cached results from the Redis database every time the user opens or refreshes the website.
+                {" "} before scoring. Scoring is done by a fine-tuned sentiment model. Results are fetched around 6 A.M. ± 2 hours local time for each country and cached in Redis. A Vercel serverless function is triggered to fetch the cached results from the Redis database every time the user opens or refreshes the website.
               </p>
             </section>
 

@@ -8,6 +8,8 @@ vi.mock("../../api/_lib/sentiment-fetch.js", () => ({ fetchCountries: vi.fn() })
 vi.mock("../../api/_lib/refresh-core.js", () => ({
   selectDueCountries: vi.fn(),
   reserveCredits: vi.fn(),
+  releaseCredits: vi.fn(),
+  refundCounts: vi.fn(() => ({ newsdata: 0, gnews: 0 })),
   persistCountries: vi.fn(),
   rebuildAggregate: vi.fn(),
 }));
@@ -18,6 +20,8 @@ import { fetchCountries } from "../../api/_lib/sentiment-fetch.js";
 import {
   selectDueCountries,
   reserveCredits,
+  releaseCredits,
+  refundCounts,
   persistCountries,
   rebuildAggregate,
 } from "../../api/_lib/refresh-core.js";
@@ -92,12 +96,15 @@ describe("POST /api/cron/refresh - orchestration", () => {
       subset: [{ code: "us" }],
       counts: { gnews: 1, newsdata: 0 },
       dayId: 1,
-      windowId: 2,
+      gnDayId: 2,
       diag: { budget: 5 },
     };
     selectDueCountries.mockResolvedValue(selection);
     reserveCredits.mockResolvedValue();
-    fetchCountries.mockResolvedValue([{ code: "us", score: 0.3, articles: [] }]);
+    const fetched = [{ code: "us", score: 0.3, articles: [] }];
+    fetchCountries.mockResolvedValue(fetched);
+    refundCounts.mockReturnValue({ newsdata: 0, gnews: 0 });
+    releaseCredits.mockResolvedValue();
     persistCountries.mockResolvedValue(["us"]);
     rebuildAggregate.mockResolvedValue(1);
 
@@ -108,6 +115,9 @@ describe("POST /api/cron/refresh - orchestration", () => {
     expect(res.body).toMatchObject({ ok: true, refreshed: ["us"], attempted: 1, aggregate: 1 });
     expect(reserveCredits).toHaveBeenCalledWith(redis, selection.counts, selection);
     expect(fetchCountries).toHaveBeenCalledWith(selection.subset, expect.any(Object));
+    // Refund runs between fetch and persist, charged against the same selection ledger.
+    expect(refundCounts).toHaveBeenCalledWith(fetched);
+    expect(releaseCredits).toHaveBeenCalledWith(redis, { newsdata: 0, gnews: 0 }, selection);
     expect(persistCountries).toHaveBeenCalled();
     expect(rebuildAggregate).toHaveBeenCalled();
     // finally → lock released
@@ -118,7 +128,7 @@ describe("POST /api/cron/refresh - orchestration", () => {
     Redis.mockImplementation(function () {
       return createFakeRedis();
     });
-    selectDueCountries.mockResolvedValue({ subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 1, windowId: 2, diag: { budget: 0 } });
+    selectDueCountries.mockResolvedValue({ subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 1, gnDayId: 2, diag: { budget: 0 } });
     rebuildAggregate.mockResolvedValue(7);
 
     const res = mockRes();

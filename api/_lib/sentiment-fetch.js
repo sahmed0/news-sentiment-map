@@ -752,6 +752,7 @@ export async function fetchCountries(subset, stats = {}) {
       code,
       name,
       score: avg,
+      status: m.status, // lets persistCountries distinguish transient vs terminal
       articles: enriched,
       fetchedAt: new Date().toISOString(),
     };

@@ -350,7 +350,7 @@ describe("fetchCountries - GNews routing for high-priority countries", () => {
     const results = await promise;
 
     const gnewsCalls = fetchFn.mock.calls.filter(([u]) => u.startsWith("https://gnews.io/"));
-    expect(gnewsCalls).toHaveLength(2); // original + GNEWS_MAX_RETRIES(1)
+    expect(gnewsCalls).toHaveLength(3); // original + GNEWS_MAX_RETRIES(2)
     expect(results[0].articles).toHaveLength(0);
     expect(results[0].score).toBeNull();
   });
@@ -392,7 +392,7 @@ describe("fetchCountries - NewsData error handling & retry", () => {
     const results = await promise;
 
     const newsCalls = fetchFn.mock.calls.filter(([u]) => u.startsWith("https://newsdata.io/"));
-    expect(newsCalls).toHaveLength(2); // original + NEWSDATA_MAX_RETRIES(1)
+    expect(newsCalls).toHaveLength(3); // original + NEWSDATA_MAX_RETRIES(2)
     expect(results[0].articles).toHaveLength(0);
     expect(results[0].score).toBeNull();
     // No headlines → no HF call at all.

@@ -8,6 +8,8 @@ import { fetchCountries } from "../_lib/sentiment-fetch.js";
 import {
   selectDueCountries,
   reserveCredits,
+  releaseCredits,
+  refundCounts,
   persistCountries,
   rebuildAggregate,
 } from "../_lib/refresh-core.js";
@@ -71,6 +73,10 @@ export default async function handler(req, res) {
     });
     const stats = {};
     const results = await fetchCountries(subset, stats);
+    // Refund credits reserved for transient failures: they're retried next tick and
+    // typically never consumed the provider's real quota, so reclaim the slack.
+    const refunded = refundCounts(results);
+    await releaseCredits(redis, refunded, selection);
     const refreshed = await persistCountries(redis, results, selection.dayId);
     const aggregate = await rebuildAggregate(redis);
 
@@ -89,6 +95,7 @@ export default async function handler(req, res) {
       debug: {
         timings: stats.timings,
         counts: stats.counts,
+        refunded,
         selection: diag,
         countries: stats.countries,
       },
