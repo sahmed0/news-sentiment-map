@@ -1,6 +1,6 @@
 // src/components/WorldMap.jsx
 // Uses d3-geo + topojson-client directly - no React 18 wrapper dependency
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import { scaleLinear } from "d3-scale";
@@ -202,6 +202,59 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
     setTooltip(null);
   }, []);
 
+  // Greedy collision-filtered labels: largest countries placed first; a candidate
+  // is skipped if its estimated bbox overlaps any already-placed label.
+  // All measurements are in SVG coordinate space (pre-zoom), so screen-pixel
+  // estimates are divided by zoomK to convert.
+  const visibleLabels = useMemo(() => {
+    const AREA_THRESHOLD = 1500;
+    const CHAR_W = 5.5;  // estimated screen px per character at 10px font
+    const PAD_H = 4;     // horizontal clearance per side (screen px)
+    const PAD_V = 3;     // vertical clearance per side (screen px)
+
+    const svgCharW = CHAR_W / zoomK;
+    const svgH = 14 / zoomK;      // label box height in SVG units
+    const svgPadH = PAD_H / zoomK;
+    const svgPadV = PAD_V / zoomK;
+
+    const candidates = countries
+      .map(f => {
+        if (f.id == null) return null;
+        const numId = String(f.id).padStart(3, "0");
+        const alpha2 = numericToAlpha2(numId);
+        const centroid = centroids[numId];
+        if (!centroid || !alpha2) return null;
+        const area = areas[numId] ?? 0;
+        if (area * zoomK * zoomK < AREA_THRESHOLD) return null;
+        const name = byCode[alpha2]?.name ?? isoCountries.getName(alpha2, "en");
+        if (!name) return null;
+        return { numId, centroid, name, area };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.area - a.area); // largest country wins on conflict
+
+    const placed = [];
+    const visible = [];
+
+    for (const c of candidates) {
+      const w = c.name.length * svgCharW + svgPadH * 2;
+      const h = svgH + svgPadV * 2;
+      const [cx, cy] = c.centroid;
+      const bbox = { x1: cx - w / 2, y1: cy - h / 2, x2: cx + w / 2, y2: cy + h / 2 };
+
+      const overlaps = placed.some(
+        p => bbox.x1 < p.x2 && bbox.x2 > p.x1 && bbox.y1 < p.y2 && bbox.y2 > p.y1
+      );
+
+      if (!overlaps) {
+        placed.push(bbox);
+        visible.push(c);
+      }
+    }
+
+    return visible;
+  }, [countries, centroids, areas, zoomK, byCode]);
+
   return (
     <div className="relative w-full h-full">
       <svg
@@ -259,47 +312,32 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
               />
             );
           })}
-          {/* Country name labels - zoom-aware: only shown when the country is
-              visually large enough (area × k² > threshold). Font size shrinks
-              with zoom so labels stay a constant visual size. */}
-          {(() => {
-            const AREA_THRESHOLD = 1500; // minimum visual area (px²) to show a label
-            return countries.map((f) => {
-              if (f.id == null) return null;
-              const numId = String(f.id).padStart(3, "0");
-              const alpha2 = numericToAlpha2(numId);
-              const centroid = centroids[numId];
-              if (!centroid || !alpha2) return null;
-              // Only render when the country is visually large enough at current zoom
-              if ((areas[numId] ?? 0) * zoomK * zoomK < AREA_THRESHOLD) return null;
-              const name =
-                byCode[alpha2]?.name ?? isoCountries.getName(alpha2, "en");
-              if (!name) return null;
-              return (
-                <text
-                  key={`label-${numId}`}
-                  x={centroid[0]}
-                  y={centroid[1]-1}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  fontSize={10 / zoomK}
-                  pointerEvents="none"
-                  style={{
-                    fill: "black",
-                    stroke: "rgba(255,255,255)",
-                    strokeWidth: 0.75 / zoomK,
-                    paintOrder: "stroke fill",
-                    fontFamily: "sans-serif",
-                    fontWeight: 600,
-                    letterSpacing: "0.01em",
-                    userSelect: "none",
-                  }}
-                >
-                  {name}
-                </text>
-              );
-            });
-          })()}
+          {/* Country name labels — collision-filtered by visibleLabels memo.
+              Labels are sorted largest-first so big countries always win when
+              two candidates' bboxes overlap. */}
+          {visibleLabels.map(({ numId, centroid, name }) => (
+            <text
+              key={`label-${numId}`}
+              x={centroid[0]}
+              y={centroid[1] - 1}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={10 / zoomK}
+              pointerEvents="none"
+              style={{
+                fill: "black",
+                stroke: "rgba(255,255,255)",
+                strokeWidth: 0.75 / zoomK,
+                paintOrder: "stroke fill",
+                fontFamily: "sans-serif",
+                fontWeight: 600,
+                letterSpacing: "0.01em",
+                userSelect: "none",
+              }}
+            >
+              {name}
+            </text>
+          ))}
         </g>
       </svg>
 
