@@ -101,7 +101,7 @@ export function Legend({ data, lastUpdated, fromCache }) {
         {/* Data freshness - derived from the most recently fetched country in data. */}
         {newestFetchedAt ? (
           <p className="opacity-60 text-[11px]">
-            Updated on {newestFetchedAt.toLocaleString("en-GB", { timeStyle: "short", dateStyle: "long" })} UTC
+            Updated on {newestFetchedAt.toLocaleString("en-GB", { timeStyle: "short", dateStyle: "long", timeZone: "UTC" })} UTC
           </p>
         ) : (
           lastUpdated && (

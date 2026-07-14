@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence, useDragControls } from "framer-motion";
 import { sentimentBucket } from "../lib/sentiment";
+import { safeHttpUrl } from "../lib/url";
 import { SentimentFilter } from "./SentimentFilter";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { X } from 'lucide-react';
@@ -62,7 +63,9 @@ function Headlines({ articles }) {
 
       {visible.length ? (
         <ul className="space-y-5">
-          {visible.map((article, i) => (
+          {visible.map((article, i) => {
+            const href = safeHttpUrl(article.url);
+            return (
             <motion.li
               key={article.url ?? i}
               initial={{ opacity: 0, y: 8 }}
@@ -70,14 +73,20 @@ function Headlines({ articles }) {
               transition={{ delay: i * 0.06 }}
             >
               <div className="flex items-start gap-2">
-                <a
-                  href={article.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block text-sm leading-snug text-fg/95 light:text-black hover:text-fg transition-colors"
-                >
-                  {article.translatedTitle || article.title}
-                </a>
+                {href ? (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-sm leading-snug text-fg/95 light:text-black hover:text-fg transition-colors"
+                  >
+                    {article.translatedTitle || article.title}
+                  </a>
+                ) : (
+                  <span className="block text-sm leading-snug text-fg/95 light:text-black">
+                    {article.translatedTitle || article.title}
+                  </span>
+                )}
                 <ArticleScore score={article.score} />
               </div>
               {showTranslation(article) && (
@@ -86,7 +95,7 @@ function Headlines({ articles }) {
                 </p>
               )}
               <p className="text-xs text-fg/50 light:text-black/70 mt-0.5">
-              Cached on {" "}
+              Published {" "}
                 {article.publishedAt
                   ? new Date(article.publishedAt).toLocaleDateString("en-GB", {
                     weekday: "long",
@@ -97,7 +106,8 @@ function Headlines({ articles }) {
                   : ""}
               </p>
             </motion.li>
-          ))}
+            );
+          })}
         </ul>
       ) : (
         <p className="text-sm text-fg/50">

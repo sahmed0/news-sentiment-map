@@ -433,18 +433,6 @@ async function fetchHeadlinesGNews(country) {
   return out(articles, articles.length ? "ok" : "empty");
 }
 
-function dominantLanguage(articles) {
-  const counts = {};
-  for (const { language } of articles) {
-    if (language) counts[language] = (counts[language] || 0) + 1;
-  }
-  let best = null, bestCount = 0;
-  for (const [lang, count] of Object.entries(counts)) {
-    if (count > bestCount) { best = lang; bestCount = count; }
-  }
-  return best;
-}
-
 async function translateHeadlines(titles) {
   if (!titles.length) return titles;
   const headers = {
@@ -648,12 +636,12 @@ export async function fetchCountries(subset, stats = {}) {
         const { articles, status, latencyMs, attempts } = await fetcher(countries[i]);
         meta.set(code, { status, ms: latencyMs, attempts });
         log(provider, code, { status, ms: latencyMs, art: articles.length, tries: attempts });
-        results.push({ code, name, articles, lang: dominantLanguage(articles) });
+        results.push({ code, name, articles });
       } catch (err) {
         // One country's failure must never abort the remaining countries.
         meta.set(code, { status: "error", ms: 0, attempts: 0 });
         console.error(`[fetchCountries] ${code} headlines:`, err);
-        results.push({ code, name, articles: [], lang: null });
+        results.push({ code, name, articles: [] });
       }
     }
     return results;
