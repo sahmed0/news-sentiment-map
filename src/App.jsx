@@ -164,12 +164,6 @@ export default function App() {
           fromCache={fromCache}
         />
       )}
-
-      {/* Google Font for the title */}
-      <link
-        rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap"
-      />
     </div>
   );
 }
