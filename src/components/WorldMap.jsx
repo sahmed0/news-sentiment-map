@@ -7,7 +7,10 @@ import { scaleLinear } from "d3-scale";
 import { zoom, zoomIdentity } from "d3-zoom";
 import { select } from "d3-selection";
 import isoCountries from "i18n-iso-countries";
+import en from "i18n-iso-countries/langs/en.json";
 import { sentimentBucket } from "../lib/sentiment";
+
+isoCountries.registerLocale(en);
 
 const GEO_URL =
   "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
