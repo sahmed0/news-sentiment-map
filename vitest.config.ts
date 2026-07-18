@@ -7,6 +7,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["test/**/*.test.{js,jsx}"],
+    include: ["test/**/*.test.{ts,tsx,js,jsx}"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json-summary"],
+      include: ["src/**", "api/**", "shared/**"],
+      exclude: ["src/main.tsx"],
+    },
   },
 });
