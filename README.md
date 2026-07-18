@@ -1,5 +1,7 @@
 # News Sentiment Map
 
+[![CI](https://github.com/sahmed0/news-sentiment-map/actions/workflows/ci.yml/badge.svg)](https://github.com/sahmed0/news-sentiment-map/actions/workflows/ci.yml)
+
 A world map coloured by the sentiment of each country's latest news headlines.
 Headlines are translated (Azure) and scored (HuggingFace), and the result is
 cached in Upstash Redis.
