@@ -7,15 +7,27 @@ import {
 
 // ---- Response / fetch helpers -------------------------------------------------
 
+// A route handler is either a canned response or a function of (url, opts). These
+// are test doubles for `fetch`, so their shapes are deliberately loose.
+type FakeResponse = ReturnType<typeof makeResponse>;
+type Route = FakeResponse | ((url: string, opts: any) => FakeResponse);
+interface Routes {
+  news?: Route;
+  gnews?: Route;
+  hfMulti?: Route;
+  hfEng?: Route;
+  azure?: Route;
+}
+
 // Minimal Response double exposing only what the code touches: status, ok,
 // headers.get(), text(), json().
-function makeResponse(status, body, headers = {}) {
+function makeResponse(status: number, body: unknown, headers: Record<string, string> = {}) {
   const raw = typeof body === "string" ? body : JSON.stringify(body);
   const h = new Map(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
   return {
     status,
     ok: status >= 200 && status < 300,
-    headers: { get: (k) => h.get(String(k).toLowerCase()) ?? null },
+    headers: { get: (k: string) => h.get(String(k).toLowerCase()) ?? null },
     text: async () => raw,
     json: async () => JSON.parse(raw),
   };
@@ -25,12 +37,12 @@ function makeResponse(status, body, headers = {}) {
 // The multilingual model was removed from the pipeline; its `hfMulti` route is
 // kept (left unconfigured by every test) purely as a tripwire - if the code ever
 // hits the multilingual URL again, `resolve` throws "no handler configured".
-function installFetch({ news, gnews, hfMulti, hfEng, azure } = {}) {
-  const resolve = (h, url, opts) => {
+function installFetch({ news, gnews, hfMulti, hfEng, azure }: Routes = {}) {
+  const resolve = (h: Route | undefined, url: string, opts: any) => {
     if (h == null) throw new Error("no handler configured for: " + url);
     return typeof h === "function" ? h(url, opts) : h;
   };
-  const fn = vi.fn(async (url, opts) => {
+  const fn = vi.fn(async (url: string, opts: any) => {
     if (url.startsWith("https://newsdata.io/")) return resolve(news, url, opts);
     if (url.startsWith("https://gnews.io/")) return resolve(gnews, url, opts);
     if (url.includes("twitter-xlm-roberta-base-sentiment")) return resolve(hfMulti, url, opts);
@@ -38,19 +50,19 @@ function installFetch({ news, gnews, hfMulti, hfEng, azure } = {}) {
     if (url.includes("cognitive.microsofttranslator")) return resolve(azure, url, opts);
     throw new Error("unexpected fetch URL: " + url);
   });
-  global.fetch = fn;
+  global.fetch = fn as unknown as typeof fetch;
   return fn;
 }
 
 // NewsData success body with the given articles.
-const newsOk = (articles) => makeResponse(200, { status: "success", results: articles });
+const newsOk = (articles: unknown[]) => makeResponse(200, { status: "success", results: articles });
 
 // GNews success body with the given articles (no per-article language field).
-const gnewsOk = (articles) => makeResponse(200, { totalArticles: articles.length, articles });
+const gnewsOk = (articles: unknown[]) => makeResponse(200, { totalArticles: articles.length, articles });
 
 // HF handler that scores every input positively (0.8 net). Mirrors the real
 // [[{label,score},...],...] batch shape.
-const hfPositive = (url, opts) => {
+const hfPositive = (url: string, opts: any) => {
   const { inputs } = JSON.parse(opts.body);
   return makeResponse(
     200,
@@ -63,12 +75,12 @@ const hfPositive = (url, opts) => {
 };
 
 // Azure handler that echoes each title prefixed with "EN:".
-const azureEcho = (url, opts) => {
+const azureEcho = (url: string, opts: any) => {
   const docs = JSON.parse(opts.body); // [{ Text }]
-  return makeResponse(200, docs.map((d) => ({ translations: [{ text: "EN:" + d.Text }] })));
+  return makeResponse(200, docs.map((d: { Text: string }) => ({ translations: [{ text: "EN:" + d.Text }] })));
 };
 
-const netError = (code) => Object.assign(new Error("conn"), { cause: { code } });
+const netError = (code: string) => Object.assign(new Error("conn"), { cause: { code } });
 const timeoutError = () => Object.assign(new Error("t"), { name: "TimeoutError" });
 
 beforeEach(() => {
@@ -142,10 +154,10 @@ describe("fetchCountries - request construction & scoring", () => {
       hfEng: hfPositive,
     });
 
-    const stats = {};
+    const stats: any = {};
     const results = await fetchCountries([{ code: "ly", name: "Libya", lang: "ar" }], stats);
 
-    const newsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://newsdata.io/"));
+    const newsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://newsdata.io/"))!;
     // The country's 2-letter lang (a NewsData-supported code) is passed straight
     // through as the &language= filter.
     expect(newsCall[0]).toBe(
@@ -158,7 +170,7 @@ describe("fetchCountries - request construction & scoring", () => {
     expect(fetchFn.mock.calls.some(([u]) => u.includes("microsofttranslator"))).toBe(false);
 
     // The English model receives the untranslated original title.
-    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"));
+    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"))!;
     expect(JSON.parse(hfCall[1].body).inputs[0]).toBe("Good news");
 
     expect(results).toHaveLength(1);
@@ -181,7 +193,7 @@ describe("fetchCountries - request construction & scoring", () => {
     });
     // "kz" is not a NewsData-supported code -> fall back to the country filter alone.
     await fetchCountries([{ code: "kz", name: "Kazakhstan", lang: "kz" }]);
-    const newsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://newsdata.io/"));
+    const newsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://newsdata.io/"))!;
     expect(newsCall[0]).not.toContain("language=");
   });
 
@@ -191,7 +203,7 @@ describe("fetchCountries - request construction & scoring", () => {
       hfEng: hfPositive,
     });
     await fetchCountries([{ code: "ly", name: "Libya" }]);
-    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"));
+    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"))!;
     const body = JSON.parse(hfCall[1].body);
     expect(body.parameters).toEqual({ top_k: null });
     expect(hfCall[1].headers.Authorization).toBe("Bearer test-hf-key");
@@ -210,10 +222,10 @@ describe("fetchCountries - request construction & scoring", () => {
     expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-roberta-base-sentiment-latest"))).toBe(true);
     expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-xlm-roberta"))).toBe(false);
 
-    const azureCall = fetchFn.mock.calls.find(([u]) => u.includes("microsofttranslator"));
+    const azureCall = fetchFn.mock.calls.find(([u]) => u.includes("microsofttranslator"))!;
     expect(azureCall[1].headers["Ocp-Apim-Subscription-Region"]).toBe("eastus");
 
-    const hfEngCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"));
+    const hfEngCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"))!;
     expect(JSON.parse(hfEngCall[1].body).inputs[0]).toBe("EN:こんにちは");
 
     expect(results[0].articles[0].translatedTitle).toBe("EN:こんにちは");
@@ -233,7 +245,7 @@ describe("fetchCountries - request construction & scoring", () => {
     // scores that translation. The multilingual model is never called.
     expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-xlm-roberta"))).toBe(false);
     expect(fetchFn.mock.calls.some(([u]) => u.includes("microsofttranslator"))).toBe(true); // translated for display + scoring
-    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"));
+    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"))!;
     expect(JSON.parse(hfCall[1].body).inputs[0]).toBe("EN:Guten Tag");
     expect(results[0].articles[0].translatedTitle).toBe("EN:Guten Tag");
     expect(results[0].score).toBeCloseTo(0.8, 5);
@@ -251,7 +263,7 @@ describe("fetchCountries - request construction & scoring", () => {
 
     const results = await fetchCountries([{ code: "ly", name: "Libya" }]);
     expect(results[0].articles).toHaveLength(2);
-    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"));
+    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"))!;
     expect(JSON.parse(hfCall[1].body).inputs).toHaveLength(2);
   });
 
@@ -280,7 +292,7 @@ describe("fetchCountries - GNews routing for high-priority countries", () => {
 
     const results = await fetchCountries([{ code: "us", name: "United States", lang: "en" }]);
 
-    const gnewsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://gnews.io/"));
+    const gnewsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://gnews.io/"))!;
     expect(gnewsCall[0]).toBe(
       "https://gnews.io/api/v4/top-headlines?category=general&country=us&max=5&apikey=test-gnews-key&lang=en"
     );
@@ -305,14 +317,14 @@ describe("fetchCountries - GNews routing for high-priority countries", () => {
 
     const results = await fetchCountries([{ code: "de", name: "Germany", lang: "de" }]);
 
-    const gnewsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://gnews.io/"));
+    const gnewsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://gnews.io/"))!;
     expect(gnewsCall[0]).toContain("country=de");
     expect(gnewsCall[0]).toContain("lang=de");
     // German is translated, then the English model scores the translation; the
     // multilingual model is never called.
     expect(fetchFn.mock.calls.some(([u]) => u.includes("twitter-xlm-roberta"))).toBe(false);
     expect(fetchFn.mock.calls.some(([u]) => u.includes("microsofttranslator"))).toBe(true);
-    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"));
+    const hfCall = fetchFn.mock.calls.find(([u]) => u.includes("twitter-roberta-base-sentiment-latest"))!;
     expect(JSON.parse(hfCall[1].body).inputs[0]).toBe("EN:Guten Tag");
     expect(results[0].articles[0].language).toBe("german"); // tagged from the country
     expect(results[0].articles[0].translatedTitle).toBe("EN:Guten Tag");
@@ -328,7 +340,7 @@ describe("fetchCountries - GNews routing for high-priority countries", () => {
 
     const results = await fetchCountries([{ code: "tr", name: "Turkey", lang: "tr" }]);
 
-    const gnewsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://gnews.io/"));
+    const gnewsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://gnews.io/"))!;
     expect(gnewsCall[0]).toContain("country=tr");
     expect(gnewsCall[0]).not.toContain("lang="); // turkish has no GNews lang code
     // Non-English → translated, then scored by the English model; no multilingual call.
@@ -431,7 +443,7 @@ describe("fetchCountries - NewsData error handling & retry", () => {
   it("isolates one country's hard failure so the rest still process", async () => {
     vi.useFakeTimers();
     const fetchFn = installFetch({
-      news: (url) => {
+      news: (url: string) => {
         // First country (ma) hits a non-retryable error; second (dz) succeeds.
         if (url.includes("country=ly")) throw new Error("boom-non-retryable");
         return newsOk([{ title: "Fine", link: "http://dz", language: "english" }]);
@@ -460,7 +472,7 @@ describe("fetchCountries - HuggingFace error handling & retry", () => {
     let call = 0;
     const fetchFn = installFetch({
       news: newsOk([{ title: "Hi", link: "http://a", language: "english" }]),
-      hfEng: (url, opts) => {
+      hfEng: (url: string, opts: any) => {
         call += 1;
         return call === 1 ? makeResponse(503, { estimated_time: 3 }) : hfPositive(url, opts);
       },

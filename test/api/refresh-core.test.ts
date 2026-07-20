@@ -17,9 +17,10 @@ import {
 } from "../../api/_lib/refresh-core.js";
 import { COUNTRIES, HIGH_PRIORITY_CODES } from "../../api/_lib/sentiment-fetch.js";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
+import type { CountryResult } from "../../shared/types.js";
 
-const dayIdOf = (now) => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
-const gnDayIdOf = (now) => Math.floor(now.getTime() / DAY_MS);
+const dayIdOf = (now: Date) => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
+const gnDayIdOf = (now: Date) => Math.floor(now.getTime() / DAY_MS);
 
 const NOW = new Date("2024-06-01T12:30:00Z"); // hour 12 UTC - chosen so the tested countries fall to backfill, not tz-due
 const allCodes = COUNTRIES.map((c) => c.code);
@@ -29,7 +30,7 @@ const doneKey = `sentiment:done:${dayIdOf(NOW)}`;
 // dynamically so the cadence tests stay valid regardless of list order/parity.
 const DUE_LOW = COUNTRIES.find(
   (c) => !HIGH_PRIORITY_CODES.has(c.code) && lowPriorityDueOn(c.code, dayIdOf(NOW))
-).code;
+)!.code;
 
 beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
@@ -219,7 +220,7 @@ describe("reserveCredits", () => {
 
 describe("releaseCredits + refundCounts", () => {
   it("refundCounts counts only transient fetches, split by provider tier", () => {
-    const lowCode = COUNTRIES.find((c) => !HIGH_PRIORITY_CODES.has(c.code)).code;
+    const lowCode = COUNTRIES.find((c) => !HIGH_PRIORITY_CODES.has(c.code))!.code;
     const results = [
       { code: "us", status: "timeout" },           // transient, high tier → GNews
       { code: "gb", status: "ok" },                // success, no refund
@@ -265,28 +266,28 @@ describe("persistCountries", () => {
 
     // us: stored + freshened + done
     expect(redis._store.get("sentiment:country:us")).toMatchObject({ code: "us", score: 0.5 });
-    expect(redis._zsets.get("sentiment:freshness").has("us")).toBe(true);
-    expect(redis._sets.get(`sentiment:done:${day}`).has("us")).toBe(true);
+    expect(redis._zsets.get("sentiment:freshness")!.has("us")).toBe(true);
+    expect(redis._sets.get(`sentiment:done:${day}`)!.has("us")).toBe(true);
 
     // gb: NOT stored, but freshened + done (terminal attempt)
     expect(redis._store.has("sentiment:country:gb")).toBe(false);
-    expect(redis._zsets.get("sentiment:freshness").has("gb")).toBe(true);
-    expect(redis._sets.get(`sentiment:done:${day}`).has("gb")).toBe(true);
+    expect(redis._zsets.get("sentiment:freshness")!.has("gb")).toBe(true);
+    expect(redis._sets.get(`sentiment:done:${day}`)!.has("gb")).toBe(true);
 
     // de: entirely untouched → retried next tick
     expect(redis._store.has("sentiment:country:de")).toBe(false);
-    expect(redis._zsets.get("sentiment:freshness").has("de")).toBe(false);
-    expect(redis._sets.get(`sentiment:done:${day}`).has("de")).toBe(false);
+    expect(redis._zsets.get("sentiment:freshness")!.has("de")).toBe(false);
+    expect(redis._sets.get(`sentiment:done:${day}`)!.has("de")).toBe(false);
 
     // fr: transient failure → entirely untouched, retried next tick (spends slack)
     expect(redis._store.has("sentiment:country:fr")).toBe(false);
-    expect(redis._zsets.get("sentiment:freshness").has("fr")).toBe(false);
-    expect(redis._sets.get(`sentiment:done:${day}`).has("fr")).toBe(false);
+    expect(redis._zsets.get("sentiment:freshness")!.has("fr")).toBe(false);
+    expect(redis._sets.get(`sentiment:done:${day}`)!.has("fr")).toBe(false);
 
     // jp: terminal status → freshened + done (not retried)
     expect(redis._store.has("sentiment:country:jp")).toBe(false);
-    expect(redis._zsets.get("sentiment:freshness").has("jp")).toBe(true);
-    expect(redis._sets.get(`sentiment:done:${day}`).has("jp")).toBe(true);
+    expect(redis._zsets.get("sentiment:freshness")!.has("jp")).toBe(true);
+    expect(redis._sets.get(`sentiment:done:${day}`)!.has("jp")).toBe(true);
   });
 });
 
@@ -311,7 +312,7 @@ describe("rebuildAggregate", () => {
     });
     const count = await rebuildAggregate(redis);
     expect(count).toBe(2);
-    const agg = redis._store.get(AGG_KEY);
+    const agg = redis._store.get(AGG_KEY) as CountryResult[];
     expect(agg).toHaveLength(2);
     expect(agg.map((c) => c.code).sort()).toEqual(["gb", "us"]);
   });

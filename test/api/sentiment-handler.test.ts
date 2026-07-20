@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
 
 // The handler does `new Redis(...)` via a dynamic import; intercept the module so
@@ -8,7 +9,17 @@ vi.mock("@upstash/redis", () => ({ Redis: vi.fn() }));
 import handler from "../../api/sentiment.js";
 import { Redis } from "@upstash/redis";
 
-function mockRes() {
+// Minimal req/res doubles; cast to the Vercel types at the call site.
+const req = () => ({}) as unknown as VercelRequest;
+interface MockRes {
+  statusCode: number | null;
+  headers: Record<string, string>;
+  body: any;
+  setHeader(k: string, v: string): void;
+  status(code: number): MockRes;
+  json(obj: any): MockRes;
+}
+function mockRes(): MockRes {
   return {
     statusCode: null,
     headers: {},
@@ -26,6 +37,7 @@ function mockRes() {
     },
   };
 }
+const call = (res: MockRes) => handler(req(), res as unknown as VercelResponse);
 
 beforeEach(() => {
   vi.stubEnv("KV_REST_API_URL", "https://fake");
@@ -34,24 +46,23 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  Redis.mockReset();
+  vi.mocked(Redis).mockReset();
 });
 
 describe("GET /api/sentiment", () => {
   it("returns 500 when Redis env vars are missing", async () => {
     vi.stubEnv("KV_REST_API_URL", "");
     const res = mockRes();
-    await handler({}, res);
+    await call(res);
     expect(res.statusCode).toBe(500);
     expect(res.body).toEqual({ error: "Redis not configured" });
   });
 
   it("returns 503 with Retry-After while the cache is cold (no aggregate yet)", async () => {
-    Redis.mockImplementation(function () {
-      return createFakeRedis(); // sentiment:world absent → get() → null
-    });
+    // Regular function (not arrow) so the handler's `new Redis(...)` can construct it.
+    vi.mocked(Redis).mockImplementation(function () { return createFakeRedis() as any; }); // sentiment:world absent → get() → null
     const res = mockRes();
-    await handler({}, res);
+    await call(res);
     expect(res.statusCode).toBe(503);
     expect(res.headers["Retry-After"]).toBe("15");
     expect(res.body.error).toMatch(/warming/i);
@@ -62,11 +73,9 @@ describe("GET /api/sentiment", () => {
       { code: "us", name: "US", score: 0.2, fetchedAt: "2024-01-02T00:00:00.000Z" },
       { code: "gb", name: "UK", score: -0.1, fetchedAt: "2024-01-01T00:00:00.000Z" },
     ];
-    Redis.mockImplementation(function () {
-      return createFakeRedis({ store: { "sentiment:world": data } });
-    });
+    vi.mocked(Redis).mockImplementation(function () { return createFakeRedis({ store: { "sentiment:world": data } }) as any; });
     const res = mockRes();
-    await handler({}, res);
+    await call(res);
     expect(res.statusCode).toBe(200);
     expect(res.body.cached).toBe(true);
     expect(res.body.data).toHaveLength(2);

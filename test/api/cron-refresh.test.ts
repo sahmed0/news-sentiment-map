@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
 
 // Isolate the cron handler from Redis and the fetch/select/persist pipeline so we
@@ -28,7 +29,13 @@ import {
 
 const LOCK_KEY = "sentiment:refresh:lock";
 
-function mockRes() {
+interface MockRes {
+  statusCode: number | null;
+  body: any;
+  status(code: number): MockRes;
+  json(obj: any): MockRes;
+}
+function mockRes(): MockRes {
   return {
     statusCode: null,
     body: null,
@@ -42,7 +49,9 @@ function mockRes() {
     },
   };
 }
-const authedReq = () => ({ headers: { authorization: "Bearer secret" } });
+const asReq = (headers: Record<string, string> = {}) => ({ headers }) as unknown as VercelRequest;
+const authedReq = () => asReq({ authorization: "Bearer secret" });
+const call = (req: VercelRequest, res: MockRes) => handler(req, res as unknown as VercelResponse);
 
 beforeEach(() => {
   vi.clearAllMocks(); // reset module-mock call history between tests
@@ -55,13 +64,13 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  Redis.mockReset();
+  vi.mocked(Redis).mockReset();
 });
 
 describe("POST /api/cron/refresh - guards", () => {
   it("rejects a request without the correct Bearer CRON_SECRET", async () => {
     const res = mockRes();
-    await handler({ headers: { authorization: "Bearer wrong" } }, res);
+    await call(asReq({ authorization: "Bearer wrong" }), res);
     expect(res.statusCode).toBe(401);
     expect(Redis).not.toHaveBeenCalled();
   });
@@ -69,16 +78,15 @@ describe("POST /api/cron/refresh - guards", () => {
   it("returns 500 when Redis env vars are missing", async () => {
     vi.stubEnv("KV_REST_API_URL", "");
     const res = mockRes();
-    await handler(authedReq(), res);
+    await call(authedReq(), res);
     expect(res.statusCode).toBe(500);
   });
 
   it("exits early when another tick already holds the lock", async () => {
-    Redis.mockImplementation(function () {
-      return createFakeRedis({ store: { [LOCK_KEY]: "1" } });
-    });
+    // Regular function (not arrow) so the handler's `new Redis(...)` can construct it.
+    vi.mocked(Redis).mockImplementation(function () { return createFakeRedis({ store: { [LOCK_KEY]: "1" } }) as any; });
     const res = mockRes();
-    await handler(authedReq(), res);
+    await call(authedReq(), res);
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({ ok: false, reason: "tick already in progress" });
     expect(selectDueCountries).not.toHaveBeenCalled();
@@ -88,28 +96,26 @@ describe("POST /api/cron/refresh - guards", () => {
 describe("POST /api/cron/refresh - orchestration", () => {
   it("runs the full pipeline and releases the lock on success", async () => {
     const redis = createFakeRedis();
-    Redis.mockImplementation(function () {
-      return redis;
-    });
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
 
-    const selection = {
+    const selection: any = {
       subset: [{ code: "us" }],
       counts: { gnews: 1, newsdata: 0 },
       dayId: 1,
       gnDayId: 2,
       diag: { budget: 5 },
     };
-    selectDueCountries.mockResolvedValue(selection);
-    reserveCredits.mockResolvedValue();
-    const fetched = [{ code: "us", score: 0.3, articles: [] }];
-    fetchCountries.mockResolvedValue(fetched);
-    refundCounts.mockReturnValue({ newsdata: 0, gnews: 0 });
-    releaseCredits.mockResolvedValue();
-    persistCountries.mockResolvedValue(["us"]);
-    rebuildAggregate.mockResolvedValue(1);
+    vi.mocked(selectDueCountries).mockResolvedValue(selection);
+    vi.mocked(reserveCredits).mockResolvedValue(undefined);
+    const fetched: any = [{ code: "us", score: 0.3, articles: [] }];
+    vi.mocked(fetchCountries).mockResolvedValue(fetched);
+    vi.mocked(refundCounts).mockReturnValue({ newsdata: 0, gnews: 0 });
+    vi.mocked(releaseCredits).mockResolvedValue(undefined);
+    vi.mocked(persistCountries).mockResolvedValue(["us"]);
+    vi.mocked(rebuildAggregate).mockResolvedValue(1);
 
     const res = mockRes();
-    await handler(authedReq(), res);
+    await call(authedReq(), res);
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({ ok: true, refreshed: ["us"], attempted: 1, aggregate: 1 });
@@ -125,14 +131,12 @@ describe("POST /api/cron/refresh - orchestration", () => {
   });
 
   it("takes the idle branch (rebuild only) when nothing is due / budget exhausted", async () => {
-    Redis.mockImplementation(function () {
-      return createFakeRedis();
-    });
-    selectDueCountries.mockResolvedValue({ subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 1, gnDayId: 2, diag: { budget: 0 } });
-    rebuildAggregate.mockResolvedValue(7);
+    vi.mocked(Redis).mockImplementation(function () { return createFakeRedis() as any; });
+    vi.mocked(selectDueCountries).mockResolvedValue({ subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 1, gnDayId: 2, diag: { budget: 0 } } as any);
+    vi.mocked(rebuildAggregate).mockResolvedValue(7);
 
     const res = mockRes();
-    await handler(authedReq(), res);
+    await call(authedReq(), res);
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({ ok: true, refreshed: [], aggregate: 7 });
@@ -143,13 +147,11 @@ describe("POST /api/cron/refresh - orchestration", () => {
 
   it("returns 500 and still releases the lock when the tick throws", async () => {
     const redis = createFakeRedis();
-    Redis.mockImplementation(function () {
-      return redis;
-    });
-    selectDueCountries.mockRejectedValue(new Error("upstream down"));
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
+    vi.mocked(selectDueCountries).mockRejectedValue(new Error("upstream down"));
 
     const res = mockRes();
-    await handler(authedReq(), res);
+    await call(authedReq(), res);
 
     expect(res.statusCode).toBe(500);
     expect(res.body).toMatchObject({ ok: false, error: "upstream down" });

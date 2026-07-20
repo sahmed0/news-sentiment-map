@@ -7,12 +7,28 @@
 // TTLs (ex / expire) are intentionally no-ops: tests inject `now`, they don't
 // wait for real expiry.
 
-export function createFakeRedis(seed = {}) {
-  const store = new Map(); // key -> value (string | number | array | object)
-  const sets = new Map(); // key -> Set<string>
-  const zsets = new Map(); // key -> Map<member, score>
+import type { RedisLike, RedisPipelineLike } from "../../shared/types.js";
 
-  const api = {
+// The fake satisfies RedisLike (so it can stand in for the real client) plus a few
+// test-only handles for assertions.
+export interface FakeRedis extends RedisLike {
+  _store: Map<string, unknown>;
+  _sets: Map<string, Set<string>>;
+  _zsets: Map<string, Map<string, number>>;
+}
+
+interface Seed {
+  store?: Record<string, unknown>;
+  sets?: Record<string, string[]>;
+  zsets?: Record<string, Record<string, number | string>>;
+}
+
+export function createFakeRedis(seed: Seed = {}): FakeRedis {
+  const store = new Map<string, unknown>(); // key -> value (string | number | array | object)
+  const sets = new Map<string, Set<string>>(); // key -> Set<string>
+  const zsets = new Map<string, Map<string, number>>(); // key -> Map<member, score>
+
+  const api: FakeRedis = {
     async get(key) {
       return store.has(key) ? store.get(key) : null;
     },
@@ -40,22 +56,23 @@ export function createFakeRedis(seed = {}) {
       return 1; // TTLs are no-ops in tests
     },
     async smembers(key) {
-      return sets.has(key) ? [...sets.get(key)] : [];
+      const s = sets.get(key);
+      return s ? [...s] : [];
     },
     async sadd(key, ...members) {
-      const s = sets.get(key) ?? new Set();
+      const s = sets.get(key) ?? new Set<string>();
       for (const m of members) s.add(m);
       sets.set(key, s);
       return members.length;
     },
     async zadd(key, ...entries) {
-      const z = zsets.get(key) ?? new Map();
+      const z = zsets.get(key) ?? new Map<string, number>();
       for (const e of entries) z.set(e.member, e.score);
       zsets.set(key, z);
       return entries.length;
     },
     async zrange(key, start, stop, opts = {}) {
-      const z = zsets.get(key) ?? new Map();
+      const z = zsets.get(key) ?? new Map<string, number>();
       const sorted = [...z.entries()].sort((a, b) => a[1] - b[1]); // score asc
       const end = stop === -1 ? sorted.length - 1 : stop;
       const slice = sorted.slice(start, end + 1);
@@ -64,19 +81,26 @@ export function createFakeRedis(seed = {}) {
     async mget(...keys) {
       return keys.map((k) => (store.has(k) ? store.get(k) : null));
     },
-    pipeline() {
-      const ops = [];
-      const queued = {};
-      for (const name of ["set", "del", "incrby", "expire", "sadd", "zadd", "get"]) {
-        queued[name] = (...args) => {
-          ops.push([name, args]);
-          return queued; // chainable
-        };
-      }
-      queued.exec = async () => {
-        const results = [];
-        for (const [name, args] of ops) results.push(await api[name](...args));
-        return results;
+    pipeline(): RedisPipelineLike {
+      const ops: [string, unknown[]][] = [];
+      const push = (name: string) => (...args: unknown[]): RedisPipelineLike => {
+        ops.push([name, args]);
+        return queued; // chainable
+      };
+      const queued: RedisPipelineLike = {
+        set: push("set"),
+        del: push("del"),
+        incrby: push("incrby"),
+        expire: push("expire"),
+        sadd: push("sadd"),
+        zadd: push("zadd"),
+        get: push("get"),
+        exec: async () => {
+          const results: unknown[] = [];
+          const dispatch = api as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+          for (const [name, args] of ops) results.push(await dispatch[name](...args));
+          return results;
+        },
       };
       return queued;
     },
