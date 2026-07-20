@@ -1,8 +1,8 @@
 // Rolling-refresh core: timezone-aware selection, a hard credit ledger, and the
 // per-country storage model that keeps the served map populated even when an
-// upstream refresh fails. Used by api/cron/refresh.js (the rolling tick).
+// upstream refresh fails. Used by api/cron/refresh.ts (the rolling tick).
 //
-// Storage model (see plan):
+// Storage model:
 //   sentiment:country:<code>  -> enriched country object, no TTL (durability)
 //   sentiment:world           -> aggregate array rebuilt every tick (what the API serves)
 //   sentiment:freshness       -> ZSET, score = last terminal-attempt epoch ms, member = code
@@ -16,13 +16,15 @@
 // one API's usage can never throttle the other.
 
 import { COUNTRIES, HIGH_PRIORITY_CODES, LOW_PRIORITY_COUNTRIES } from "./sentiment-fetch.js";
+import { parseCountryResult } from "../../shared/types.js";
+import type { CountryDef, CountryResult, ProviderCounts, RedisLike, Selection } from "../../shared/types.js";
 
 export const AGG_KEY = "sentiment:world";
-const COUNTRY_KEY = (code) => `sentiment:country:${code}`;
+const COUNTRY_KEY = (code: string): string => `sentiment:country:${code}`;
 const FRESH_KEY = "sentiment:freshness";
-const DONE_KEY = (dayId) => `sentiment:done:${dayId}`;
-const ND_CREDIT_DAY_KEY = (dayId) => `sentiment:credits:nd:day:${dayId}`;
-const GN_CREDIT_DAY_KEY = (dayId) => `sentiment:credits:gn:day:${dayId}`;
+const DONE_KEY = (dayId: number): string => `sentiment:done:${dayId}`;
+const ND_CREDIT_DAY_KEY = (dayId: number): string => `sentiment:credits:nd:day:${dayId}`;
+const GN_CREDIT_DAY_KEY = (dayId: number): string => `sentiment:credits:gn:day:${dayId}`;
 
 // NewsData free tier: 200 credits / day. Stay a margin under it. NEWSDATA_MAX_PER_TICK
 // bounds the NewsData work in a single cron tick (each country is fetched + scored
@@ -46,7 +48,7 @@ const TARGET_LOCAL_HOUR = 6; // refresh each country near 6 am local time
 // 30 h leaves a margin: normal timing is driven by the target hour, and backfill
 // only steps in to recover a country that genuinely fell behind. Without this gate
 // backfill fetches every not-done country all day in staleness order, eroding the
-// 6 am-local schedule into "refresh everyone, earliest-due-be-damned" (see plan).
+// 6 am-local schedule into "refresh everyone, earliest-due-be-damned".
 const STALE_BACKFILL_MS = 30 * 60 * 60 * 1000;
 const DONE_TTL = 26 * 60 * 60; // 26 h - outlives a NewsData day so the set is whole-day
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -56,11 +58,11 @@ export const NEWSDATA_DAY_OFFSET_MS = 60 * 60 * 1000;
 
 // NewsData-aligned day (shifted to its 1am reset) - drives the done-set, the
 // NewsData credit ledger, and the low-priority cadence.
-const dayId = (now) => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
+const dayId = (now: Date): number => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
 // GNews resets on the plain UTC calendar day (midnight), so its ledger uses an
 // unshifted day. Keying it off dayId would mis-book ~one tick of usage in the
 // 00:00-01:00 UTC gap into the previous ledger day.
-const gnDayId = (now) => Math.floor(now.getTime() / DAY_MS);
+const gnDayId = (now: Date): number => Math.floor(now.getTime() / DAY_MS);
 
 // Fixed cadence phase per low-priority country: its position in the list modulo
 // LOW_PRIORITY_DAYS. Round-robin assignment partitions the low-priority countries
@@ -69,22 +71,22 @@ const gnDayId = (now) => Math.floor(now.getTime() / DAY_MS);
 // every country is never-fetched and the daily NewsData budget exceeds the list
 // size) fetches them all on the same day, bunching the whole list into one cohort
 // that then refreshes together every LOW_PRIORITY_DAYS - a lopsided ~100/0 split.
-const LOW_PRIORITY_PHASE = new Map(
+const LOW_PRIORITY_PHASE = new Map<string, number>(
   LOW_PRIORITY_COUNTRIES.map((c, i) => [c.code, i % LOW_PRIORITY_DAYS])
 );
 
 // Whether a low-priority country is in the cohort due on the given day-bucket.
 // (`%` is sign-safe here since real day-buckets are positive, but normalise anyway
 // so negative test/day values can't flip a cohort.) Exported for tests/diagnostics.
-export const lowPriorityDueOn = (code, day) =>
+export const lowPriorityDueOn = (code: string, day: number): boolean =>
   ((day % LOW_PRIORITY_DAYS) + LOW_PRIORITY_DAYS) % LOW_PRIORITY_DAYS ===
   LOW_PRIORITY_PHASE.get(code);
 
 // UTC hour at which a country's local time is ~TARGET_LOCAL_HOUR.
-const targetUtcHour = (utcOffset) =>
+const targetUtcHour = (utcOffset: number): number =>
   ((TARGET_LOCAL_HOUR - utcOffset) % 24 + 24) % 24;
 
-const toInt = (v) => {
+const toInt = (v: unknown): number => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
@@ -100,7 +102,7 @@ const toInt = (v) => {
 // for high-priority, NewsData for the rest), so neither API throttles the other.
 // A NEWSDATA_MAX_COUNTRIES env var hard-caps the TOTAL picked so `vercel dev`
 // only ever touches a tiny subset.
-export async function selectDueCountries(redis, now = new Date()) {
+export async function selectDueCountries(redis: RedisLike, now: Date = new Date()): Promise<Selection> {
   const hour = now.getUTCHours();
   const day = dayId(now);
   const gnDay = gnDayId(now);
@@ -112,12 +114,13 @@ export async function selectDueCountries(redis, now = new Date()) {
     redis.zrange(FRESH_KEY, 0, -1, { withScores: true }), // [code, epochMs, ...] oldest-attempt first
   ]);
 
-  const done = new Set(doneList || []);
+  const done = new Set<string>(doneList || []);
   // code -> last terminal-attempt epoch ms. Drives both the staleness ordering
   // (backfill) and the low-priority cadence gate below.
-  const lastFetch = new Map();
-  for (let i = 0; i + 1 < (freshPairs || []).length; i += 2) {
-    lastFetch.set(freshPairs[i], Number(freshPairs[i + 1]));
+  const lastFetch = new Map<string, number>();
+  const pairs = freshPairs || [];
+  for (let i = 0; i + 1 < pairs.length; i += 2) {
+    lastFetch.set(String(pairs[i]), Number(pairs[i + 1]));
   }
 
   // Per-provider remaining budget. Each provider is bounded by its daily quota and
@@ -141,11 +144,11 @@ export async function selectDueCountries(redis, now = new Date()) {
   // NewsData day via dayId) so within-day jitter can't drift the cadence into an
   // extra day. The phase gate (lowPriorityDueOn) is what keeps the per-day load
   // even - it stops more than one cohort being eligible on the same day.
-  const lastDay = (c) => {
+  const lastDay = (c: CountryDef): number => {
     const last = lastFetch.get(c.code);
     return last === undefined ? -Infinity : dayId(new Date(last));
   };
-  const isEligible = (c) => {
+  const isEligible = (c: CountryDef): boolean => {
     if (HIGH_PRIORITY_CODES.has(c.code)) return true;
     if (!lowPriorityDueOn(c.code, day)) return false;
     return day - lastDay(c) >= LOW_PRIORITY_DAYS;
@@ -155,7 +158,7 @@ export async function selectDueCountries(redis, now = new Date()) {
   // the handler and echoed in the cron's debug response.
   const pending = COUNTRIES.filter((c) => !done.has(c.code));
   const notDone = pending.filter(isEligible);
-  const result = {
+  const result: Selection = {
     subset: [],
     counts: { newsdata: 0, gnews: 0 }, // reserved per provider by the caller
     dayId: day,
@@ -178,7 +181,7 @@ export async function selectDueCountries(redis, now = new Date()) {
 
   // Staleness: lower = staler. Never-attempted countries (absent from the ZSET)
   // rank -1 so they sort ahead of everything and are tried first.
-  const staleness = (c) => (lastFetch.has(c.code) ? lastFetch.get(c.code) : -1);
+  const staleness = (c: CountryDef): number => lastFetch.get(c.code) ?? -1;
 
   // Hours elapsed since the NewsData day began (01:00 UTC, per NEWSDATA_DAY_OFFSET_MS).
   // The done-set resets at that boundary, so this is the natural clock for "has a
@@ -187,20 +190,20 @@ export async function selectDueCountries(redis, now = new Date()) {
   const hoursIntoDay = ((hour - dayStartHour) % 24 + 24) % 24;
   // A country is "early" when its 6 am-local target falls later in the current day
   // than now - i.e. fetching it this tick would be ahead of schedule.
-  const isEarly = (c) => {
+  const isEarly = (c: CountryDef): boolean => {
     const target = ((targetUtcHour(c.utcOffset) - dayStartHour) % 24 + 24) % 24;
     return hoursIntoDay < target;
   };
   // Badly overdue: last terminal attempt was > STALE_BACKFILL_MS ago, or never
   // (the -1 sentinel sorts below any epoch). Such a country jumped a full cycle, so
   // backfill may pull it forward even before its target hour to recover it.
-  const veryStale = (c) => staleness(c) < now.getTime() - STALE_BACKFILL_MS;
+  const veryStale = (c: CountryDef): boolean => staleness(c) < now.getTime() - STALE_BACKFILL_MS;
 
   // Order one provider's eligible countries: timezone-due first (stalest within
   // that), then the stalest of the rest as backfill - but a backfill country that
   // is still early for its target hour is held back unless it's badly overdue, so
   // spare budget recovers genuine misses instead of fetching everyone hours early.
-  const orderDue = (list) => {
+  const orderDue = (list: CountryDef[]): { ordered: CountryDef[]; tzCount: number; backCount: number } => {
     const tz = list
       .filter((c) => targetUtcHour(c.utcOffset) === hour)
       .sort((a, b) => staleness(a) - staleness(b));
@@ -237,7 +240,7 @@ export async function selectDueCountries(redis, now = new Date()) {
 // is { newsdata, gnews } - the number of HTTP requests about to be made to each
 // provider (one per country) - charged to that provider's own ledger. NewsData uses
 // the shifted `dayId`; GNews uses its own midnight-UTC `gnDayId` (see selectDueCountries).
-export async function reserveCredits(redis, counts, { dayId: day, gnDayId: gnDay }) {
+export async function reserveCredits(redis: RedisLike, counts: ProviderCounts, { dayId: day, gnDayId: gnDay }: { dayId: number; gnDayId: number }): Promise<void> {
   const nd = toInt(counts?.newsdata);
   const gn = toInt(counts?.gnews);
   if (nd <= 0 && gn <= 0) return;
@@ -261,7 +264,7 @@ export async function reserveCredits(redis, counts, { dayId: day, gnDayId: gnDay
 // (the keys already carry a TTL from the reservation). Terminal outcomes
 // (empty/unsupported/4xx) and scorable-but-unscored fetches DID hit the provider,
 // so they keep their charge - see refundCounts.
-export async function releaseCredits(redis, counts, { dayId: day, gnDayId: gnDay }) {
+export async function releaseCredits(redis: RedisLike, counts: ProviderCounts, { dayId: day, gnDayId: gnDay }: { dayId: number; gnDayId: number }): Promise<void> {
   const nd = toInt(counts?.newsdata);
   const gn = toInt(counts?.gnews);
   if (nd <= 0 && gn <= 0) return;
@@ -271,10 +274,16 @@ export async function releaseCredits(redis, counts, { dayId: day, gnDayId: gnDay
   await p.exec();
 }
 
+// A refund/persist decision only needs a country's code and fetch status.
+interface StatusResult {
+  code: string;
+  status?: string;
+}
+
 // Per-provider count of fetches worth refunding: those whose status is transient
 // (the same set that drives the retry decision in persistCountries, so refund and
 // retry stay in lockstep). Split by tier since each provider owns its own ledger.
-export function refundCounts(results) {
+export function refundCounts(results: readonly StatusResult[]): ProviderCounts {
   let newsdata = 0, gnews = 0;
   for (const c of results || []) {
     if (!isTransientStatus(c.status)) continue;
@@ -287,15 +296,24 @@ export function refundCounts(results) {
 // Fetch outcomes worth retrying later the same day - a provider-side blip the
 // daily budget slack is sized to absorb - vs terminal outcomes (empty /
 // unsupported / 4xx) that won't improve on a retry. The status strings come
-// from fetchHeadlines / fetchHeadlinesGNews (see sentiment-fetch.js).
-const TRANSIENT_STATUSES = new Set([
+// from fetchHeadlines / fetchHeadlinesGNews (see sentiment-fetch.ts).
+const TRANSIENT_STATUSES = new Set<string>([
   "timeout", "network_error", "rate_limited", "api_error", "invalid_json", "error",
 ]);
-export function isTransientStatus(status) {
+export function isTransientStatus(status: string | null | undefined): boolean {
   if (!status) return false;
   if (TRANSIENT_STATUSES.has(status)) return true;
   const m = /^http_(\d+)$/.exec(status);
   return m ? Number(m[1]) >= 500 : false;
+}
+
+// The minimum shape persistCountries needs off each result (CountryResult satisfies
+// it; the tests pass partial objects with just these fields).
+interface PersistResult {
+  code: string;
+  score: number | null;
+  status?: string;
+  articles?: ReadonlyArray<{ title?: string | null }>;
 }
 
 // Persist results. A country counts as refreshed only when it actually produced
@@ -311,14 +329,15 @@ export function isTransientStatus(status) {
 // done AND freshened (it's a terminal attempt) so a low-priority quiet country
 // waits out its cadence instead of retrying daily.
 // Returns the codes that got real data.
-export async function persistCountries(redis, results, day) {
+export async function persistCountries(redis: RedisLike, results: readonly PersistResult[], day: number): Promise<string[]> {
   const now = Date.now();
   const p = redis.pipeline();
-  const refreshed = [];
+  const refreshed: string[] = [];
 
   for (const c of results) {
-    const scored = c.articles?.length > 0 && typeof c.score === "number";
-    const scorable = c.articles?.length > 0 && c.articles.some((a) => a.title);
+    const articles = c.articles ?? [];
+    const scored = articles.length > 0 && typeof c.score === "number";
+    const scorable = articles.length > 0 && articles.some((a) => a.title);
     if (scored) {
       p.set(COUNTRY_KEY(c.code), c);
       p.zadd(FRESH_KEY, { score: now, member: c.code });
@@ -348,13 +367,16 @@ export async function persistCountries(redis, results, day) {
 // Rebuild the served aggregate from the durable per-country keys. Idempotent and
 // race-free (reads all keys, writes one). Countries never fetched are simply
 // absent. No TTL - the map keeps serving last-good data through any outage.
-export async function rebuildAggregate(redis) {
+export async function rebuildAggregate(redis: RedisLike): Promise<number> {
   const codes = COUNTRIES.map((c) => c.code);
   const values = await redis.mget(...codes.map(COUNTRY_KEY));
-  const data = values.filter(Boolean).map((c) => ({
-    ...c,
-    highPriority: HIGH_PRIORITY_CODES.has(c.code),
-  }));
+  const data: CountryResult[] = values
+    .map(parseCountryResult)
+    .filter((c): c is CountryResult => c !== null)
+    .map((c) => ({
+      ...c,
+      highPriority: HIGH_PRIORITY_CODES.has(c.code),
+    }));
   await redis.set(AGG_KEY, data);
   return data.length;
 }

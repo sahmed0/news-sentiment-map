@@ -1,6 +1,7 @@
 // Shared fetch logic used by both the on-demand handler and the cron pre-warmer
 
 import { now, since, log, debug, DEBUG } from "./logger.js";
+import type { Article, CountryDef, CountryResult, RawArticle } from "../../shared/types.js";
 
 // utcOffset = standard-time offset (hours) of the country's primary population
 // centre, used to fire each country's daily refresh near 6 am local. Half-hour
@@ -15,7 +16,7 @@ import { now, since, log, debug, DEBUG } from "./logger.js";
 // still auto-detects on translate, so a mistagged stray (e.g. an English wire
 // story in a non-English feed) degrades gracefully rather than breaking.
 
-export const HIGH_PRIORITY_COUNTRIES = [
+export const HIGH_PRIORITY_COUNTRIES: readonly CountryDef[] = [
   { code: "us", name: "United States", utcOffset: -5, lang: "en" },
   { code: "in", name: "India", utcOffset: 6, lang: "en" },
   { code: "es", name: "Spain", utcOffset: 1, lang: "es" },
@@ -86,7 +87,7 @@ export const HIGH_PRIORITY_COUNTRIES = [
   { code: "zw", name: "Zimbabwe", utcOffset: 2, lang: "en" },
 ];
 
-export const LOW_PRIORITY_COUNTRIES = [
+export const LOW_PRIORITY_COUNTRIES: readonly CountryDef[] = [
   { code: "ma", name: "Morocco", utcOffset: 1, lang: "ar,en,fr" },
   { code: "ir", name: "Iran", utcOffset: 3, lang: "fa,en" },
   { code: "hr", name: "Croatia", utcOffset: 1, lang: "hr,en" },
@@ -178,12 +179,12 @@ export const LOW_PRIORITY_COUNTRIES = [
 
 // All supported countries, high tier first. Derived so existing consumers
 // (rebuildAggregate, fetchAllCountries) keep working against one flat list.
-export const COUNTRIES = [...HIGH_PRIORITY_COUNTRIES, ...LOW_PRIORITY_COUNTRIES];
+export const COUNTRIES: readonly CountryDef[] = [...HIGH_PRIORITY_COUNTRIES, ...LOW_PRIORITY_COUNTRIES];
 
 // O(1) tier test for the scheduler. Membership = "fetched every day"; every
 // country only in LOW_PRIORITY_COUNTRIES is refreshed at most every
-// LOW_PRIORITY_DAYS days (see refresh-core.js), split into even per-day cohorts.
-export const HIGH_PRIORITY_CODES = new Set(HIGH_PRIORITY_COUNTRIES.map((c) => c.code));
+// LOW_PRIORITY_DAYS days (see refresh-core.ts), split into even per-day cohorts.
+export const HIGH_PRIORITY_CODES = new Set<string>(HIGH_PRIORITY_COUNTRIES.map((c) => c.code));
 
 export const CACHE_TTL = 25 * 60 * 60; // 25 hours - overlap ensures cron always refreshes before expiry
 export const NEWSDATA_DELAY_MS = 2000; // gap between consecutive requests - keeps us under NewsData.io's 1 req/sec limit (1000ms safety margin)
@@ -199,7 +200,7 @@ export const GNEWS_SIZE = 5; // headlines per high-priority country - matches Ne
 // GNews (GNews supports exactly this subset of ISO codes) and (b) tag each GNews
 // article with the English name the translate/score router expects - mirroring
 // the format NewsData.io uses for its per-article `language` field.
-const ISO_TO_NEWSDATA_LANG = {
+const ISO_TO_NEWSDATA_LANG: Record<string, string> = {
   "en": "english", "es": "spanish", "it": "italian", "de": "german", "fr": "french",
   "pt": "portuguese", "ru": "russian", "el": "greek", "nl": "dutch", "ja": "japanese",
   "zh": "chinese", "sv": "swedish", "ar": "arabic", "ro": "romanian", "he": "hebrew",
@@ -212,7 +213,7 @@ const ISO_TO_NEWSDATA_LANG = {
 // of codes NewsData actually supports. A country whose code is absent (or an invalid
 // stray like "kz"/"kh") omits the language parameter and falls back to the country
 // filter alone, rather than risking a 422 UnsupportedLanguage.
-const NEWSDATA_SUPPORTED_LANGS = new Set([
+const NEWSDATA_SUPPORTED_LANGS = new Set<string>([
   "en", "es", "it", "de", "fr", "pt", "ru", "el", "nl", "ja", "zh", "sv", "ar",
   "ro", "he", "uk", "no", "hi", "tr", "ko", "th", "id", "ms", "pl", "cs", "hu",
   "bg", "vi", "bn", "fa", "hr", "da", "et", "lv", "lt", "sk", "sl", "sq", "sr",
@@ -225,7 +226,7 @@ export const HF_MAX_BACKOFF_MS = 30000; // cap a single HF wait (a cold-start es
 
 // Transient connection-layer failures thrown by undici (Node's fetch) - the
 // request never reached an HTTP response, so a quick retry often succeeds.
-const RETRYABLE_NETWORK_CODES = new Set([
+const RETRYABLE_NETWORK_CODES = new Set<string>([
   "UND_ERR_CONNECT_TIMEOUT", // connect timed out (newsdata.io:443)
   "UND_ERR_SOCKET",          // socket closed unexpectedly
   "ECONNRESET",              // peer reset the connection
@@ -234,13 +235,22 @@ const RETRYABLE_NETWORK_CODES = new Set([
   "EAI_AGAIN",               // transient DNS lookup failure
 ]);
 
+// Small structural helpers for reading untyped values off fetch/JSON boundaries
+// without `any` casts.
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null;
+const asStr = (v: unknown): string | null => (typeof v === "string" ? v : null);
+// Pull a named field off a thrown value (Error, DOMException, or a plain object).
+const errField = (e: unknown, field: string): unknown => (isRecord(e) ? e[field] : undefined);
+
 // fetch() rejects with a TypeError whose `cause` carries the real code. An
 // AbortSignal.timeout() firing rejects with a DOMException named "TimeoutError" -
 // treat that like a transient failure so a slow request retries then gives up.
-export function isRetryableNetworkError(err) {
-  if (err?.name === "TimeoutError") return true;
-  const code = err?.cause?.code ?? err?.code;
-  return RETRYABLE_NETWORK_CODES.has(code);
+export function isRetryableNetworkError(err: unknown): boolean {
+  if (errField(err, "name") === "TimeoutError") return true;
+  const cause = errField(err, "cause");
+  const code = (isRecord(cause) ? cause.code : undefined) ?? errField(err, "code");
+  return typeof code === "string" && RETRYABLE_NETWORK_CODES.has(code);
 }
 const AZURE_BATCH_SIZE = 100;           // Azure Translator max documents per request
 const HF_BATCH_SIZE = 50;               // headlines per HuggingFace request - keeps payloads small
@@ -248,15 +258,15 @@ const HF_BATCH_SIZE = 50;               // headlines per HuggingFace request - k
 const HF_ENGLISH_MODEL =
   "https://router.huggingface.co/hf-inference/models/cardiffnlp/twitter-roberta-base-sentiment-latest";
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Last path segment of a HF model URL, for terse log lines (e.g. "twitter-roberta-base-sentiment-latest").
-const modelShortName = (url) => url.split("/").pop();
+const modelShortName = (url: string): string => url.split("/").pop() ?? url;
 
 // Normalize a provider timestamp to an ISO string, or null if missing/unparseable.
 // new Date(bad).toISOString() THROWS (RangeError), so a single malformed publishedAt
 // must be parsed defensively or it would abort the whole country's fetch.
-const toIsoOrNull = (value) => {
+const toIsoOrNull = (value: string | null | undefined): string | null => {
   if (!value) return null;
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? null : new Date(ms).toISOString();
@@ -264,7 +274,7 @@ const toIsoOrNull = (value) => {
 
 // Parse a Retry-After header (RFC 7231): either delta-seconds or an HTTP date.
 // Returns the wait in ms, or null when the header is missing/unparseable.
-export function parseRetryAfter(headerValue) {
+export function parseRetryAfter(headerValue: string | null | undefined): number | null {
   if (!headerValue) return null;
   const seconds = Number(headerValue);
   if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
@@ -273,28 +283,49 @@ export function parseRetryAfter(headerValue) {
   return null;
 }
 
+// A provider fetcher's outcome. `status` is a coarse label the caller folds into
+// the run summary; the two providers share this contract so fetchCountries can
+// route by tier without caring which one produced the headlines.
+interface FetchOutcome {
+  articles: RawArticle[];
+  status: string;
+  latencyMs: number;
+  attempts: number;
+}
+
+interface RetryResult {
+  res: Response | null;
+  status: string | null;
+  attempts: number;
+}
+
 // Shared retry loop for HTTP headline fetches. Handles two transient failure modes:
 //   - HTTP 429: honor Retry-After when present, else exponential backoff.
 //   - connection errors (fetch throws): exponential backoff.
 // Returns { res, attempts } on a non-429 HTTP response, or
 //         { res: null, status, attempts } when retries are exhausted.
-async function fetchWithRetry(url, { tag, code, maxRetries, minGapMs, backoffBaseMs }) {
-  let res;
-  let attempts;
+async function fetchWithRetry(
+  url: string,
+  { tag, code, maxRetries, minGapMs, backoffBaseMs }:
+    { tag: string; code: string; maxRetries: number; minGapMs: number; backoffBaseMs: number },
+): Promise<RetryResult> {
+  let res: Response;
+  let attempts: number;
   for (let attempt = 0; ; attempt++) {
     attempts = attempt + 1;
     try {
       res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     } catch (err) {
       if (!isRetryableNetworkError(err)) throw err;
-      const errCode = err?.cause?.code ?? err?.code ?? err?.name;
-      const status = err?.name === "TimeoutError" ? "timeout" : "network_error";
+      const cause = errField(err, "cause");
+      const errCode = (isRecord(cause) ? cause.code : undefined) ?? errField(err, "code") ?? errField(err, "name");
+      const status = errField(err, "name") === "TimeoutError" ? "timeout" : "network_error";
       if (attempt >= maxRetries) {
-        console.error(`[${tag}] ${code}: ${errCode} - gave up after ${attempt} retries`);
+        console.error(`[${tag}] ${code}: ${String(errCode)} - gave up after ${attempt} retries`);
         return { res: null, status, attempts };
       }
       const wait = Math.max(minGapMs, backoffBaseMs * 2 ** attempt);
-      console.warn(`[${tag}] ${code}: ${errCode} - retrying in ${wait}ms (attempt ${attempt + 1}/${maxRetries})`);
+      console.warn(`[${tag}] ${code}: ${String(errCode)} - retrying in ${wait}ms (attempt ${attempt + 1}/${maxRetries})`);
       await delay(wait);
       continue;
     }
@@ -314,7 +345,7 @@ async function fetchWithRetry(url, { tag, code, maxRetries, minGapMs, backoffBas
 // Returns { articles, status, latencyMs, attempts } - `status` is a coarse outcome
 // label (ok | empty | unsupported | rate_limited | http_<code> | timeout |
 // network_error | invalid_json | api_error) the caller folds into the run summary.
-async function fetchHeadlines(country) {
+async function fetchHeadlines(country: FetchTarget): Promise<FetchOutcome> {
   const { code: countryCode, lang } = country;
   const langParam = lang && NEWSDATA_SUPPORTED_LANGS.has(lang) ? `&language=${lang}` : "";
   const url = `https://newsdata.io/api/1/latest?country=${countryCode.toLowerCase()}${langParam}&sort=source&removeduplicate=1&size=5&apikey=${process.env.NEWSDATA_API_KEY}`;
@@ -323,9 +354,9 @@ async function fetchHeadlines(country) {
     tag: "NewsData", code: countryCode,
     maxRetries: NEWSDATA_MAX_RETRIES, minGapMs: NEWSDATA_DELAY_MS, backoffBaseMs: NEWSDATA_BACKOFF_BASE_MS,
   });
-  const out = (articles, status) => ({ articles, status, latencyMs: since(start), attempts });
+  const out = (articles: RawArticle[], status: string): FetchOutcome => ({ articles, status, latencyMs: since(start), attempts });
 
-  if (!res) return out([], earlyStatus);
+  if (!res) return out([], earlyStatus ?? "network_error");
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     // Unsupported country (HTTP 422 / UnsupportedFilter): log a clean, intentional
@@ -337,31 +368,36 @@ async function fetchHeadlines(country) {
     console.error(`[NewsData] ${countryCode}: HTTP ${res.status} - ${body.slice(0, 400)}`);
     return out([], `http_${res.status}`);
   }
-  let data;
+  let data: unknown;
   try {
     data = await res.json();
   } catch {
     console.error(`[NewsData] ${countryCode}: invalid JSON response`);
     return out([], "invalid_json");
   }
-  if (data.status !== "success") {
+  if (!isRecord(data) || data.status !== "success") {
     console.error(`[NewsData] ${countryCode}: ${JSON.stringify(data)}`);
     return out([], "api_error");
   }
   // NewsData.io can return the same article multiple times in one response -
   // dedupe by link (falling back to normalized title) so a country isn't filled
   // with repeats and its average isn't skewed by a duplicated headline.
-  const seen = new Set();
-  const articles = [];
-  for (const a of data.results || []) {
-    const key = (a.link || a.title || "").trim().toLowerCase();
+  const seen = new Set<string>();
+  const articles: RawArticle[] = [];
+  const results = Array.isArray(data.results) ? data.results : [];
+  for (const a of results) {
+    if (!isRecord(a)) continue;
+    const link = asStr(a.link);
+    const title = asStr(a.title);
+    const key = (link || title || "").trim().toLowerCase();
     if (!key || seen.has(key)) continue;
     seen.add(key);
+    const pubDate = asStr(a.pubDate);
     articles.push({
-      title: a.title,
-      url: a.link,
-      publishedAt: toIsoOrNull(a.pubDate ? a.pubDate.replace(" ", "T") + "Z" : null),
-      language: a.language || null,
+      title,
+      url: link,
+      publishedAt: toIsoOrNull(pubDate ? pubDate.replace(" ", "T") + "Z" : null),
+      language: asStr(a.language) || null,
     });
   }
   return out(articles, articles.length ? "ok" : "empty");
@@ -375,7 +411,7 @@ async function fetchHeadlines(country) {
 //
 // `country` is a HIGH_PRIORITY_COUNTRIES entry (needs `code` + `lang`). GNews gives
 // no per-article language, so every headline is tagged with `country.lang`.
-async function fetchHeadlinesGNews(country) {
+async function fetchHeadlinesGNews(country: FetchTarget): Promise<FetchOutcome> {
   const { code, lang } = country;
   const params = new URLSearchParams({
     category: "general",
@@ -386,57 +422,68 @@ async function fetchHeadlinesGNews(country) {
   // lang is the ISO 639-1 code from HIGH_PRIORITY_COUNTRIES. ISO_TO_NEWSDATA_LANG
   // doubles as the GNews supported-lang allowlist: if the ISO code is present,
   // GNews accepts it directly as the `lang=` parameter value.
-  if (ISO_TO_NEWSDATA_LANG[lang]) params.set("lang", lang);
+  if (lang && ISO_TO_NEWSDATA_LANG[lang]) params.set("lang", lang);
   const url = `https://gnews.io/api/v4/top-headlines?${params}`;
   const start = now();
   const { res, status: earlyStatus, attempts } = await fetchWithRetry(url, {
     tag: "GNews", code,
     maxRetries: GNEWS_MAX_RETRIES, minGapMs: GNEWS_DELAY_MS, backoffBaseMs: GNEWS_BACKOFF_BASE_MS,
   });
-  const out = (articles, status) => ({ articles, status, latencyMs: since(start), attempts });
+  const out = (articles: RawArticle[], status: string): FetchOutcome => ({ articles, status, latencyMs: since(start), attempts });
 
-  if (!res) return out([], earlyStatus);
+  if (!res) return out([], earlyStatus ?? "network_error");
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     console.error(`[GNews] ${code}: HTTP ${res.status} - ${body.slice(0, 400)}`);
     return out([], `http_${res.status}`);
   }
-  let data;
+  let data: unknown;
   try {
     data = await res.json();
   } catch {
     console.error(`[GNews] ${code}: invalid JSON response`);
     return out([], "invalid_json");
   }
-  if (!Array.isArray(data.articles)) {
+  if (!isRecord(data) || !Array.isArray(data.articles)) {
     console.error(`[GNews] ${code}: ${JSON.stringify(data).slice(0, 400)}`);
     return out([], "api_error");
   }
   // Dedupe by url (falling back to normalized title) so a country isn't filled
   // with repeats - mirrors the NewsData path.
-  const seen = new Set();
-  const articles = [];
+  const seen = new Set<string>();
+  const articles: RawArticle[] = [];
   for (const a of data.articles) {
-    const key = (a.url || a.title || "").trim().toLowerCase();
+    if (!isRecord(a)) continue;
+    const aUrl = asStr(a.url);
+    const title = asStr(a.title);
+    const key = (aUrl || title || "").trim().toLowerCase();
     if (!key || seen.has(key)) continue;
     seen.add(key);
     articles.push({
-      title: a.title,
-      url: a.url,
-      publishedAt: toIsoOrNull(a.publishedAt),
+      title,
+      url: aUrl,
+      publishedAt: toIsoOrNull(asStr(a.publishedAt)),
       // Convert ISO code to the English name the "english" routing guard expects.
       // Falls back to the ISO code for unmapped languages (they route to the
       // translate path, which is correct).
-      language: ISO_TO_NEWSDATA_LANG[lang] ?? lang,
+      language: (lang && ISO_TO_NEWSDATA_LANG[lang]) ?? lang ?? null,
     });
   }
   return out(articles, articles.length ? "ok" : "empty");
 }
 
-async function translateHeadlines(titles) {
+// Read the `.text` off one Azure Translator result document, or "" when absent.
+const azureText = (r: unknown): string => {
+  if (!isRecord(r)) return "";
+  const t = r.translations;
+  if (!Array.isArray(t) || !isRecord(t[0])) return "";
+  return typeof t[0].text === "string" ? t[0].text : "";
+};
+
+async function translateHeadlines(titles: string[]): Promise<string[] | null> {
   if (!titles.length) return titles;
-  const headers = {
-    "Ocp-Apim-Subscription-Key": process.env.AZURE_TRANSLATOR_KEY,
+  const headers: Record<string, string> = {
+    "Ocp-Apim-Subscription-Key": process.env.AZURE_TRANSLATOR_KEY ?? "",
     "Content-Type": "application/json",
   };
   // Regional (non-Global) Translator resources require the region header,
@@ -445,7 +492,7 @@ async function translateHeadlines(titles) {
     headers["Ocp-Apim-Subscription-Region"] = process.env.AZURE_TRANSLATOR_REGION;
   }
   const start = now();
-  let res;
+  let res: Response;
   try {
     res = await fetch(
       "https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=en",
@@ -459,7 +506,7 @@ async function translateHeadlines(titles) {
   } catch (e) {
     // Timeout or connection error: degrade like an HTTP failure so callers
     // substitute empty translations rather than the whole tick hanging.
-    const status = e?.name === "TimeoutError" ? "timeout" : "network_error";
+    const status = errField(e, "name") === "TimeoutError" ? "timeout" : "network_error";
     log("Azure", "translate", { status, docs: titles.length, ms: since(start) });
     return null;
   }
@@ -470,9 +517,10 @@ async function translateHeadlines(titles) {
     return null;
   }
   try {
-    const results = JSON.parse(rawBody);
+    const results: unknown = JSON.parse(rawBody);
+    if (!Array.isArray(results)) throw new Error("not an array");
     log("Azure", "translate", { status: "ok", docs: titles.length, ms: since(start) });
-    return results.map((r) => r.translations?.[0]?.text ?? "");
+    return results.map(azureText);
   } catch {
     log("Azure", "translate", { status: "invalid_json", docs: titles.length, ms: since(start) });
     console.error(`[Azure] translate invalid response: ${rawBody.slice(0, 200)}`);
@@ -480,8 +528,8 @@ async function translateHeadlines(titles) {
   }
 }
 
-async function translateAll(titles) {
-  const out = [];
+async function translateAll(titles: string[]): Promise<string[]> {
+  const out: string[] = [];
   for (let i = 0; i < titles.length; i += AZURE_BATCH_SIZE) {
     const chunk = titles.slice(i, i + AZURE_BATCH_SIZE);
     const translated = await translateHeadlines(chunk);
@@ -491,10 +539,10 @@ async function translateAll(titles) {
   return out;
 }
 
-async function batchSentimentModel(modelUrl, inputs) {
+async function batchSentimentModel(modelUrl: string, inputs: string[]): Promise<(number | null)[]> {
   // Skip empty inputs but track original indices so scores align with the input array
   const nonempty = inputs.map((input, i) => ({ i, input })).filter(({ input }) => input.length > 0);
-  const scores = inputs.map(() => null);
+  const scores: (number | null)[] = inputs.map(() => null);
   if (!nonempty.length) return scores;
 
   const model = modelShortName(modelUrl);
@@ -504,9 +552,9 @@ async function batchSentimentModel(modelUrl, inputs) {
   // error, a timeout, HTTP 503 "model loading" (cold start), or HTTP 429. Only
   // after retries are exhausted do we fall back to the all-null `scores` array
   // so a momentary blip can't durably leave a whole batch of countries unscored.
-  let results;
+  let results: unknown;
   for (let attempt = 0; ; attempt++) {
-    let res;
+    let res: Response;
     try {
       res = await fetch(modelUrl, {
         method: "POST",
@@ -527,15 +575,16 @@ async function batchSentimentModel(modelUrl, inputs) {
     } catch (e) {
       // Timeout or connection error: retry if transient, else null the batch so
       // it degrades gracefully instead of stalling the tick.
-      const status = e?.name === "TimeoutError" ? "timeout" : "network_error";
+      const status = errField(e, "name") === "TimeoutError" ? "timeout" : "network_error";
       if (isRetryableNetworkError(e) && attempt < HF_MAX_RETRIES) {
         const wait = Math.min(HF_MAX_BACKOFF_MS, HF_BACKOFF_BASE_MS * 2 ** attempt);
         console.warn(`[HuggingFace] ${model}: ${status} - retrying in ${wait}ms (attempt ${attempt + 1}/${HF_MAX_RETRIES})`);
         await delay(wait);
         continue;
       }
+      const cause = errField(e, "cause");
       log("HF", model, { status, items: nonempty.length, ms: since(start) });
-      console.error(`[HuggingFace] request failed: ${e?.name ?? e?.cause?.code ?? e}`);
+      console.error(`[HuggingFace] request failed: ${String(errField(e, "name") ?? (isRecord(cause) ? cause.code : undefined) ?? e)}`);
       return scores;
     }
 
@@ -548,8 +597,9 @@ async function batchSentimentModel(modelUrl, inputs) {
         let wait = parseRetryAfter(res.headers.get("retry-after"));
         if (wait === null && res.status === 503) {
           try {
-            const { estimated_time } = JSON.parse(rawBody);
-            if (Number.isFinite(estimated_time)) wait = estimated_time * 1000;
+            const parsed: unknown = JSON.parse(rawBody);
+            const est = isRecord(parsed) ? parsed.estimated_time : undefined;
+            if (typeof est === "number" && Number.isFinite(est)) wait = est * 1000;
           } catch {
             // Non-JSON 503 body; fall through to exponential backoff.
           }
@@ -580,16 +630,19 @@ async function batchSentimentModel(modelUrl, inputs) {
     break; // success
   }
 
+  // Re-narrow after the loop (control-flow narrowing doesn't survive the break).
+  if (!Array.isArray(results)) return scores;
   // HF returns [{label,score},...] for a single input, [[{label,score},...],...]  for a batch
   const isBatch = Array.isArray(results[0]);
-  const normalized = isBatch ? results : [results];
+  const normalized: unknown[] = isBatch ? results : [results];
 
   nonempty.forEach(({ i }, j) => {
     const labelArr = normalized[j];
     if (!Array.isArray(labelArr)) return;
     let score = 0;
     for (const item of labelArr) {
-      const lbl = item?.label?.toLowerCase();
+      if (!isRecord(item)) continue;
+      const lbl = typeof item.label === "string" ? item.label.toLowerCase() : null;
       if (!lbl || typeof item.score !== "number") continue;
       if (lbl.includes("positive")) score += item.score;
       if (lbl.includes("negative")) score -= item.score;
@@ -603,8 +656,8 @@ async function batchSentimentModel(modelUrl, inputs) {
 // Scores every input individually, splitting into HF_BATCH_SIZE-sized requests
 // so a large headline set never exceeds a single payload. Returns one score
 // (or null) per input, aligned to the input array.
-async function scoreInChunks(modelUrl, inputs) {
-  const scores = [];
+async function scoreInChunks(modelUrl: string, inputs: string[]): Promise<(number | null)[]> {
+  const scores: (number | null)[] = [];
   for (let i = 0; i < inputs.length; i += HF_BATCH_SIZE) {
     const chunk = inputs.slice(i, i + HF_BATCH_SIZE);
     scores.push(...(await batchSentimentModel(modelUrl, chunk)));
@@ -612,23 +665,78 @@ async function scoreInChunks(modelUrl, inputs) {
   return scores;
 }
 
+// A fetch target is a country to refresh. selectDueCountries yields full CountryDef
+// entries, but callers/tests may pass a partial ({ code, name }); the fetchers read
+// only `code` and (optionally) `lang`.
+export interface FetchTarget {
+  code: string;
+  name: string;
+  lang?: string;
+  utcOffset?: number;
+}
+
+// Per-country fetch outcome, merged with scores in Phase 5.
+interface Meta {
+  status: string;
+  ms: number;
+  attempts: number;
+}
+
+// Optional per-run diagnostics filled in place for the cron's debug response.
+export interface FetchStats {
+  timings?: { fetchMs: number; translateMs: number; scoreMs: number; totalMs: number };
+  counts?: {
+    countries: number;
+    headlines: number;
+    toTranslate: number;
+    englishScored: number;
+    translatedScored: number;
+    nullScores: number;
+  };
+  countries?: Array<{
+    code: string;
+    status: string | undefined;
+    ms: number | undefined;
+    articles: number;
+    scored: number;
+    score: number | null;
+  }>;
+}
+
+// A headline flattened out for scoring, carrying enough to write results back.
+interface ScoreRef {
+  code: string;
+  idx: number;
+  title: string;
+  language: string | null;
+}
+
+// A country with its raw (un-enriched) headlines, as produced by a fetch batch.
+interface FetchedCountry {
+  code: string;
+  name: string;
+  articles: RawArticle[];
+}
+
+type Fetcher = (country: FetchTarget) => Promise<FetchOutcome>;
+
 // Fetch + score a specific subset of countries. `subset` is a list of
 // { code, name } entries (a slice of COUNTRIES). Returns one enriched country
 // object per input, in input order. `fetchAllCountries` is the whole-world case.
 // The optional `stats` object is filled in place with per-stage timings, counts,
 // and a per-country breakdown for debugging (surfaced in the cron's response).
-export async function fetchCountries(subset, stats = {}) {
+export async function fetchCountries(subset: FetchTarget[], stats: FetchStats = {}): Promise<CountryResult[]> {
   const t0 = now();
   // Per-country fetch outcome, keyed by code (merged with scores in Phase 5).
-  const meta = new Map();
+  const meta = new Map<string, Meta>();
 
   // Phase 1: fetch headlines in two parallel batches - one per provider.
   // Within each batch, requests are spaced by that provider's gap so its rate
   // limit is respected. The two providers share no quota, so the batches can
   // overlap freely and the wall-clock time is max(gnBatchTime, ndBatchTime)
   // instead of their sum.
-  const fetchBatch = async (countries, fetcher, delayMs, provider) => {
-    const results = [];
+  const fetchBatch = async (countries: FetchTarget[], fetcher: Fetcher, delayMs: number, provider: string): Promise<FetchedCountry[]> => {
+    const results: FetchedCountry[] = [];
     for (let i = 0; i < countries.length; i++) {
       if (i > 0) await delay(delayMs);
       const { code, name } = countries[i];
@@ -667,12 +775,12 @@ export async function fetchCountries(subset, stats = {}) {
   //   - english headline     → scored on its original text, no translation
   //   - any other language    → translated (for display AND scoring), then the
   //                             English model scores that translation
-  const scoreItems = []; // every titled headline, scored by the English model
-  const toTranslate = []; // every non-English headline (display + scoring input)
+  const scoreItems: ScoreRef[] = []; // every titled headline, scored by the English model
+  const toTranslate: ScoreRef[] = []; // every non-English headline (display + scoring input)
   for (const country of fetched) {
     country.articles.forEach((a, idx) => {
       if (!a.title) return;
-      const ref = { code: country.code, idx, title: a.title, language: a.language };
+      const ref: ScoreRef = { code: country.code, idx, title: a.title, language: a.language };
       scoreItems.push(ref);
       if (a.language !== "english") toTranslate.push(ref);
     });
@@ -685,7 +793,7 @@ export async function fetchCountries(subset, stats = {}) {
     ? await translateAll(toTranslate.map((it) => it.title))
     : [];
   const translateMs = since(tTranslate);
-  const translationByRef = new Map();
+  const translationByRef = new Map<ScoreRef, string | null>();
   toTranslate.forEach((ref, i) => translationByRef.set(ref, translations[i] || null));
 
   // Phase 3b: score every headline with the English model. English headlines are
@@ -701,22 +809,28 @@ export async function fetchCountries(subset, stats = {}) {
   const scoreMs = since(tScore);
 
   // Phase 4: write scores + English translations back onto each article (null until set)
-  const articleScores = new Map(fetched.map((c) => [c.code, c.articles.map(() => null)]));
-  const articleTrans = new Map(fetched.map((c) => [c.code, c.articles.map(() => null)]));
-  scoreItems.forEach((it, i) => { articleScores.get(it.code)[it.idx] = scores[i] ?? null; });
-  toTranslate.forEach((it) => { articleTrans.get(it.code)[it.idx] = translationByRef.get(it); });
+  const articleScores = new Map<string, (number | null)[]>(fetched.map((c) => [c.code, c.articles.map(() => null)]));
+  const articleTrans = new Map<string, (string | null)[]>(fetched.map((c) => [c.code, c.articles.map(() => null)]));
+  scoreItems.forEach((it, i) => {
+    const arr = articleScores.get(it.code);
+    if (arr) arr[it.idx] = scores[i] ?? null;
+  });
+  toTranslate.forEach((it) => {
+    const arr = articleTrans.get(it.code);
+    if (arr) arr[it.idx] = translationByRef.get(it) ?? null;
+  });
 
   // Phase 5: country score = average of its headlines' scores (ignoring nulls)
-  const perCountry = [];
-  const results = fetched.map(({ code, name, articles }) => {
-    const scores = articleScores.get(code);
-    const trans = articleTrans.get(code);
-    const enriched = articles.map((a, idx) => ({
+  const perCountry: NonNullable<FetchStats["countries"]> = [];
+  const results: CountryResult[] = fetched.map(({ code, name, articles }) => {
+    const cScores = articleScores.get(code) ?? [];
+    const trans = articleTrans.get(code) ?? [];
+    const enriched: Article[] = articles.map((a, idx) => ({
       ...a,
-      score: scores[idx],
-      translatedTitle: trans[idx], // English translation, or null when not needed
+      score: cScores[idx] ?? null,
+      translatedTitle: trans[idx] ?? null, // English translation, or null when not needed
     }));
-    const valid = scores.filter((s) => typeof s === "number");
+    const valid = cScores.filter((s): s is number => typeof s === "number");
     const avg = valid.length ? valid.reduce((sum, s) => sum + s, 0) / valid.length : null;
 
     // Per-headline detail is the noisiest output - only when DEBUG_PIPELINE=1.
@@ -726,11 +840,11 @@ export async function fetchCountries(subset, stats = {}) {
       );
     }
 
-    const m = meta.get(code) || {};
+    const m = meta.get(code);
     perCountry.push({
       code,
-      status: m.status,
-      ms: m.ms,
+      status: m?.status,
+      ms: m?.ms,
       articles: articles.length,
       scored: valid.length,
       score: avg === null ? null : Number(avg.toFixed(3)),
@@ -740,7 +854,7 @@ export async function fetchCountries(subset, stats = {}) {
       code,
       name,
       score: avg,
-      status: m.status, // lets persistCountries distinguish transient vs terminal
+      status: m?.status, // lets persistCountries distinguish transient vs terminal
       articles: enriched,
       fetchedAt: new Date().toISOString(),
     };
@@ -766,6 +880,6 @@ export async function fetchCountries(subset, stats = {}) {
 }
 
 // Whole-world fetch - kept for the daily safety-net cron and any full reconcile.
-export async function fetchAllCountries() {
-  return fetchCountries(COUNTRIES);
+export async function fetchAllCountries(): Promise<CountryResult[]> {
+  return fetchCountries([...COUNTRIES]);
 }

@@ -1,9 +1,10 @@
-// api/cron/refresh.js - Rolling refresh tick
+// api/cron/refresh.ts - Rolling refresh tick
 // Fired hourly by an Upstash QStash schedule (cron `0 * * * *`), the sole trigger.
 // Each tick refreshes the countries whose local time is ~6 am now (plus stale
 // backfill), strictly within the NewsData.io free-tier credit budget. Auth is the
 // Bearer CRON_SECRET that QStash forwards via Upstash-Forward-Authorization.
 
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { fetchCountries } from "../_lib/sentiment-fetch.js";
 import {
   selectDueCountries,
@@ -14,6 +15,7 @@ import {
   rebuildAggregate,
 } from "../_lib/refresh-core.js";
 import { log, err, now, since } from "../_lib/logger.js";
+import type { FetchStats } from "../_lib/sentiment-fetch.js";
 
 const LOCK_KEY = "sentiment:refresh:lock";
 // Match maxDuration (300 s) so the lock can't expire mid-tick and let a second
@@ -26,7 +28,7 @@ const LOCK_TTL = 300; // seconds
 // timeouts keep a normal tick far shorter than this.
 export const config = { maxDuration: 300 };
 
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   const authHeader = req.headers.authorization;
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -71,7 +73,7 @@ export default async function handler(req, res) {
       newsdata: selection.counts.newsdata,
       codes: subset.map((c) => c.code).join(","),
     });
-    const stats = {};
+    const stats: FetchStats = {};
     const results = await fetchCountries(subset, stats);
     // Refund credits reserved for transient failures: they're retried next tick and
     // typically never consumed the provider's real quota, so reclaim the slack.
@@ -103,9 +105,10 @@ export default async function handler(req, res) {
   } catch (e) {
     // Surface the failure reason in the response body so it's visible in the
     // QStash dashboard, and log the full stack to Vercel function logs.
-    err("Tick", "error", { message: e?.message, ms: since(t0) });
-    console.error(e?.stack || e);
-    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    const message = e instanceof Error ? e.message : String(e);
+    err("Tick", "error", { message, ms: since(t0) });
+    console.error(e instanceof Error ? e.stack : e);
+    return res.status(500).json({ ok: false, error: message });
   } finally {
     await redis.del(LOCK_KEY);
   }
