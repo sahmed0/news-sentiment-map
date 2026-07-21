@@ -1,11 +1,13 @@
 // src/hooks/useTheme.js
 import { useEffect, useState } from "react";
 
+type Theme = "light" | "dark";
+
 const STORAGE_KEY = "nsm-theme";
 
 // Light by default; remembers the user's choice across sessions.
-export function useTheme() {
-  const [theme, setTheme] = useState(() => {
+export function useTheme(): { theme: Theme; toggle: () => void } {
+  const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") return "light";
     return localStorage.getItem(STORAGE_KEY) === "dark" ? "dark" : "light";
   });
@@ -17,6 +19,6 @@ export function useTheme() {
     document.documentElement.classList.toggle("theme-light", theme === "light");
   }, [theme]);
 
-  const toggle = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+  const toggle = () => setTheme((t: Theme) => (t === "dark" ? "light" : "dark"));
   return { theme, toggle };
 }

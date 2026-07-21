@@ -1,13 +1,25 @@
-// src/hooks/useSentimentData.js
+// src/hooks/useSentimentData.ts
 import { useState, useEffect, useCallback } from "react";
+import type { CountryResult, SentimentResponse } from "../../shared/types";
 
 const API_URL = "/api/sentiment";
 
-export function useSentimentData() {
-  const [data, setData] = useState([]); // array of { code, name, score, articles }
+// Shape returned by the hook. Need to extend this (warming state, memoized byCode).
+export interface UseSentimentData {
+  data: CountryResult[];
+  byCode: Record<string, CountryResult>;
+  loading: boolean;
+  error: string | null;
+  lastUpdated: Date | null;
+  fromCache: boolean;
+  refetch: () => void;
+}
+
+export function useSentimentData(): UseSentimentData {
+  const [data, setData] = useState<CountryResult[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [fromCache, setFromCache] = useState(false);
 
   // Named function expression so the 503 retry can recurse via its own internal
@@ -24,12 +36,12 @@ export function useSentimentData() {
         return;
       }
       if (!res.ok) throw new Error(`API error: ${res.status}`);
-      const json = await res.json();
+      const json: SentimentResponse = await res.json();
       setData(json.data || []);
       setFromCache(json.cached ?? false);
       setLastUpdated(new Date());
     } catch (err) {
-      setError(err.message);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -42,7 +54,7 @@ export function useSentimentData() {
   // Returns a lookup map keyed by UPPERCASE alpha-2 to match the map's
   // NUMERIC_TO_ALPHA2 table: { "US": { score, articles, name }, ... }.
   // API codes are lowercase ("us"), so normalize here or the map lookup misses.
-  const byCode = data.reduce((acc, country) => {
+  const byCode = data.reduce<Record<string, CountryResult>>((acc, country) => {
     acc[country.code.toUpperCase()] = country;
     return acc;
   }, {});
