@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { renderHook, act, waitFor, cleanup } from "@testing-library/react";
-import { useSentimentData } from "../../src/hooks/useSentimentData.js";
+import { renderHook, act, waitFor, cleanup, type RenderHookResult } from "@testing-library/react";
+import { useSentimentData, type UseSentimentData } from "../../src/hooks/useSentimentData";
 
 // Response double matching what the hook touches: status, ok, headers.get, json().
-const res = (status, body, headers = {}) => ({
+const res = (status: number, body: unknown, headers: Record<string, string> = {}) => ({
   status,
   ok: status >= 200 && status < 300,
-  headers: { get: (k) => headers[k] ?? null },
+  headers: { get: (k: string) => headers[k] ?? null },
   json: async () => body,
 });
 
@@ -49,7 +49,7 @@ describe("useSentimentData", () => {
       .mockResolvedValueOnce(res(503, { error: "warming" }, { "Retry-After": "1" }))
       .mockResolvedValueOnce(res(200, { data: [{ code: "us", name: "US", score: 0.1 }], cached: true }));
 
-    let result;
+    let result!: RenderHookResult<UseSentimentData, unknown>["result"];
     await act(async () => {
       ({ result } = renderHook(() => useSentimentData()));
     });
@@ -67,7 +67,7 @@ describe("useSentimentData", () => {
     vi.useFakeTimers();
     global.fetch = vi.fn().mockResolvedValue(res(503, { error: "warming" }, { "Retry-After": "1" }));
 
-    let result;
+    let result!: RenderHookResult<UseSentimentData, unknown>["result"];
     await act(async () => {
       ({ result } = renderHook(() => useSentimentData()));
     });

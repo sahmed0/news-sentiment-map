@@ -1,24 +1,27 @@
-// src/components/CountryPanel.jsx
+// src/components/CountryPanel.tsx
 import { useState } from "react";
-import { motion, AnimatePresence, useDragControls } from "framer-motion";
+import { motion, AnimatePresence, useDragControls, type MotionProps, type PanInfo } from "framer-motion";
 import { sentimentBucket } from "../lib/sentiment";
 import { safeHttpUrl } from "../lib/url";
 import { SentimentFilter } from "./SentimentFilter";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { X } from 'lucide-react';
+import type { Article, CountryResult, FilterKey } from "../../shared/types";
 
 // Show the English translation only when it exists and actually differs from
 // the original (Azure echoes English text back unchanged for English headlines).
-function showTranslation(article) {
+function showTranslation(article: Article) {
   const t = article.translatedTitle;
   if (!t || !t.trim()) return false;
   return t.trim().toLowerCase() !== (article.title ?? "").trim().toLowerCase();
 }
 
 // Small colored sentiment chip for an individual headline score.
-function ArticleScore({ score }) {
+function ArticleScore({ score }: { score: number | null }) {
   const bucket = sentimentBucket(score);
-  if (!bucket) return null;
+  // sentimentBucket's null check doesn't narrow `score` itself, so re-check the
+  // type before .toFixed - both are true together (bucket is null iff not a number).
+  if (!bucket || typeof score !== "number") return null;
   return (
     <span
       className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums"
@@ -36,10 +39,10 @@ function ArticleScore({ score }) {
 
 // Headlines list with a sentiment filter. Lives under the key={country.code}
 // element, so its filter state resets automatically when the country changes.
-function Headlines({ articles }) {
-  const [filter, setFilter] = useState("all");
+function Headlines({ articles }: { articles: Article[] }) {
+  const [filter, setFilter] = useState<FilterKey>("all");
 
-  const counts = articles.reduce(
+  const counts = articles.reduce<Record<FilterKey, number>>(
     (acc, a) => {
       const bucket = sentimentBucket(a.score);
       if (bucket) acc[bucket] += 1;
@@ -118,7 +121,7 @@ function Headlines({ articles }) {
   );
 }
 
-function SentimentBar({ score }) {
+function SentimentBar({ score }: { score: number }) {
   // score in [-1, 1]
   const pct = ((score + 1) / 2) * 100; // map to [0, 100]
   const color =
@@ -165,14 +168,19 @@ function SentimentBar({ score }) {
   );
 }
 
-export function CountryPanel({ country, onClose }) {
+interface CountryPanelProps {
+  country: CountryResult | null;
+  onClose: () => void;
+}
+
+export function CountryPanel({ country, onClose }: CountryPanelProps) {
   const isMobile = useIsMobile();
   const dragControls = useDragControls();
 
   // Mobile: a bottom sheet that slides up and can be flicked down to dismiss.
   // Drag is initiated only from the grab handle (see below) so the headlines
   // list scrolls normally. ≥md: a side panel that slides in from the right.
-  const motionProps = isMobile
+  const motionProps: MotionProps = isMobile
     ? {
         initial: { y: "100%", opacity: 0 },
         animate: { y: 0, opacity: 1 },
@@ -182,7 +190,7 @@ export function CountryPanel({ country, onClose }) {
         dragControls,
         dragConstraints: { top: 0, bottom: 0 },
         dragElastic: { top: 0, bottom: 0.6 },
-        onDragEnd: (_, info) => {
+        onDragEnd: (_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
           if (info.offset.y > 120 || info.velocity.y > 500) onClose();
         },
       }
@@ -249,10 +257,13 @@ export function CountryPanel({ country, onClose }) {
             </button>
           </div>
 
-          {/* Sentiment score */}
-          <div className="px-5 pt-4">
-            <SentimentBar score={country.score} />
-          </div>
+          {/* Sentiment score - only shown for scored countries (the map only
+              opens the panel when a country has a numeric score). */}
+          {typeof country.score === "number" && (
+            <div className="px-5 pt-4">
+              <SentimentBar score={country.score} />
+            </div>
+          )}
 
           {/* Headlines + sentiment filter */}
           <Headlines articles={country.articles ?? []} />

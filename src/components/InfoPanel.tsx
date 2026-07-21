@@ -1,12 +1,15 @@
-// src/components/InfoPanel.jsx
-import { motion, AnimatePresence, useDragControls } from "framer-motion";
+// src/components/InfoPanel.tsx
+import { motion, AnimatePresence, useDragControls, type MotionProps, type PanInfo } from "framer-motion";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { X } from 'lucide-react';
 import { Logo } from '@kiwicarbon/assets';
 
-// Inline GitHub mark - the pinned lucide-react (1.17.0) dropped its brand
-// icons, so an inline SVG avoids pulling in another icon dependency.
-function GithubMark({ size = 28 }) {
+interface InfoPanelProps {
+  open: boolean;
+  onClose: () => void;
+}
+
+function GithubMark({ size = 28 }: { size?: number }) {
   return (
     <svg
       width={size}
@@ -20,11 +23,11 @@ function GithubMark({ size = 28 }) {
   );
 }
 
-export function InfoPanel({ open, onClose }) {
+export function InfoPanel({ open, onClose }: InfoPanelProps) {
   const isMobile = useIsMobile();
   const dragControls = useDragControls();
 
-  const motionProps = isMobile
+  const motionProps: MotionProps = isMobile
     ? {
         initial: { y: "100%", opacity: 0 },
         animate: { y: 0, opacity: 1 },
@@ -34,7 +37,7 @@ export function InfoPanel({ open, onClose }) {
         dragControls,
         dragConstraints: { top: 0, bottom: 0 },
         dragElastic: { top: 0, bottom: 0.6 },
-        onDragEnd: (_, info) => {
+        onDragEnd: (_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
           if (info.offset.y > 120 || info.velocity.y > 500) onClose();
         },
       }

@@ -1,4 +1,4 @@
-// src/App.jsx
+// src/App.tsx
 import { useState, useMemo } from "react";
 import { WorldMap } from "./components/WorldMap";
 import { CountryPanel } from "./components/CountryPanel";
@@ -9,18 +9,19 @@ import { useSentimentData } from "./hooks/useSentimentData";
 import { useTheme } from "./hooks/useTheme";
 import { Sun, Moon, Info } from 'lucide-react';
 import { InfoPanel } from "./components/InfoPanel";
+import type { CountryResult, FilterKey } from "../shared/types";
 
 export default function App() {
   const { byCode, data, loading, error, lastUpdated, fromCache } =
     useSentimentData();
   const { theme, toggle: toggleTheme } = useTheme();
-  const [selectedCountry, setSelectedCountry] = useState(null);
-  const [sentimentFilter, setSentimentFilter] = useState("all");
+  const [selectedCountry, setSelectedCountry] = useState<CountryResult | null>(null);
+  const [sentimentFilter, setSentimentFilter] = useState<FilterKey>("all");
   const [showInfo, setShowInfo] = useState(false);
 
   // Country counts per sentiment bucket for the map filter ("all" = all scored).
-  const sentimentCounts = useMemo(() => {
-    const counts = { all: 0, positive: 0, neutral: 0, negative: 0 };
+  const sentimentCounts = useMemo<Record<FilterKey, number>>(() => {
+    const counts: Record<FilterKey, number> = { all: 0, positive: 0, neutral: 0, negative: 0 };
     for (const country of data) {
       const bucket = sentimentBucket(country.score);
       if (bucket) {

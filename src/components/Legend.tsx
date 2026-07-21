@@ -1,6 +1,13 @@
-// src/components/Legend.jsx
+// src/components/Legend.tsx
 import { useState } from "react";
 import { useIsMobile } from "../hooks/useMediaQuery";
+import type { CountryResult } from "../../shared/types";
+
+interface LegendProps {
+  data: CountryResult[];
+  lastUpdated: Date | null;
+  fromCache: boolean;
+}
 
 const GRADIENT_STOPS = [
   { pct: "0%", color: "#ff0000" },
@@ -8,17 +15,21 @@ const GRADIENT_STOPS = [
   { pct: "100%", color: "#00ff00" },
 ];
 
-export function Legend({ data, lastUpdated, fromCache }) {
+export function Legend({ data, lastUpdated, fromCache }: LegendProps) {
   const isMobile = useIsMobile();
   // Collapsed by default on phones; expanded by default on desktop (toggleable everywhere).
   const [open, setOpen] = useState(() => !isMobile);
 
-  const scored = data.filter((c) => c.score !== null);
+  // Type predicate so the scored subset carries a non-null score - lets the sort
+  // and .toFixed below stay clean without per-use null checks.
+  const scored = data.filter(
+    (c): c is CountryResult & { score: number } => c.score !== null
+  );
   const sorted = [...scored].sort((a, b) => b.score - a.score);
   const top3 = sorted.slice(0, 3);
   const bottom3 = sorted.slice(-3).reverse();
 
-  const newestFetchedAt = data.reduce((best, c) => {
+  const newestFetchedAt = data.reduce<Date | null>((best, c) => {
     if (!c.fetchedAt) return best;
     const d = new Date(c.fetchedAt);
     return !best || d > best ? d : best;
