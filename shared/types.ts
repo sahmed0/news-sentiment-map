@@ -120,6 +120,8 @@ export interface RedisPipelineLike {
   expire(key: string, seconds: number): RedisPipelineLike;
   sadd(key: string, ...members: string[]): RedisPipelineLike;
   zadd(key: string, entry: { score: number; member: string }, ...entries: { score: number; member: string }[]): RedisPipelineLike;
+  zremrangebyscore(key: string, min: number, max: number): RedisPipelineLike;
+  zremrangebyrank(key: string, start: number, stop: number): RedisPipelineLike;
   get(key: string): RedisPipelineLike;
   exec(): Promise<unknown[]>;
 }
@@ -133,6 +135,8 @@ export interface RedisLike {
   sadd(key: string, ...members: string[]): Promise<number>;
   zadd(key: string, entry: { score: number; member: string }, ...entries: { score: number; member: string }[]): Promise<number | null>;
   zrange(key: string, start: number, stop: number, opts?: { withScores?: boolean }): Promise<(string | number)[]>;
+  zremrangebyscore(key: string, min: number, max: number): Promise<number>;
+  zremrangebyrank(key: string, start: number, stop: number): Promise<number>;
   mget(...keys: string[]): Promise<unknown[]>;
   pipeline(): RedisPipelineLike;
 }

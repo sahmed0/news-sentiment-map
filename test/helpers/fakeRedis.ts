@@ -1,6 +1,7 @@
 // In-memory Upstash-Redis double. Implements only the methods the app actually
-// calls (get/set/del/incrby/expire/smembers/sadd/zadd/zrange/mget + pipeline),
-// with just enough fidelity for the scheduling, credit-ledger, and handler tests:
+// calls (get/set/del/incrby/expire/smembers/sadd/zadd/zrange/zremrangebyscore/
+// zremrangebyrank/lpush/ltrim/lrange/mget + pipeline), with just enough fidelity
+// for the scheduling, credit-ledger, history, tick-log, and handler tests:
 //   - set({ nx, ex }) returns "OK" or null so lock semantics work
 //   - zrange({ withScores }) returns a flat [member, score, ...] sorted by score
 //   - pipeline() queues ops and applies them on exec()
@@ -78,6 +79,34 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
       const slice = sorted.slice(start, end + 1);
       return opts.withScores ? slice.flatMap(([m, s]) => [m, s]) : slice.map(([m]) => m);
     },
+    async zremrangebyscore(key, min, max) {
+      const z = zsets.get(key);
+      if (!z) return 0;
+      let removed = 0;
+      for (const [m, s] of [...z.entries()]) {
+        if (s >= min && s <= max) { // both ends inclusive, as in Redis
+          z.delete(m);
+          removed++;
+        }
+      }
+      return removed;
+    },
+    async zremrangebyrank(key, start, stop) {
+      const z = zsets.get(key);
+      if (!z) return 0;
+      const sorted = [...z.entries()].sort((a, b) => a[1] - b[1]); // rank = score asc
+      const len = sorted.length;
+      // Negative ranks count back from the end, so -(N+1) as `stop` keeps the
+      // last N members - the form the history cap relies on.
+      const from = Math.max(0, start < 0 ? len + start : start);
+      const to = Math.min(len - 1, stop < 0 ? len + stop : stop);
+      let removed = 0;
+      for (let i = from; i <= to; i++) {
+        z.delete(sorted[i][0]);
+        removed++;
+      }
+      return removed;
+    },
     async mget(...keys) {
       return keys.map((k) => (store.has(k) ? store.get(k) : null));
     },
@@ -94,6 +123,8 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
         expire: push("expire"),
         sadd: push("sadd"),
         zadd: push("zadd"),
+        zremrangebyscore: push("zremrangebyscore"),
+        zremrangebyrank: push("zremrangebyrank"),
         get: push("get"),
         exec: async () => {
           const results: unknown[] = [];

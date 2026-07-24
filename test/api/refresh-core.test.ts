@@ -14,6 +14,8 @@ import {
   isTransientStatus,
   rebuildAggregate,
   lowPriorityDueOn,
+  HISTORY_KEY,
+  HISTORY_MAX_DAYS,
 } from "../../api/_lib/refresh-core.js";
 import { COUNTRIES, HIGH_PRIORITY_CODES } from "../../api/_lib/sentiment-fetch.js";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
@@ -288,6 +290,72 @@ describe("persistCountries", () => {
     expect(redis._store.has("sentiment:country:jp")).toBe(false);
     expect(redis._zsets.get("sentiment:freshness")!.has("jp")).toBe(true);
     expect(redis._sets.get(`sentiment:done:${day}`)!.has("jp")).toBe(true);
+  });
+});
+
+describe("persistCountries history", () => {
+  // The stored members are JSON; decode a country's whole series, oldest first.
+  const series = (redis: ReturnType<typeof createFakeRedis>, code: string) =>
+    [...(redis._zsets.get(HISTORY_KEY(code)) ?? new Map<string, number>()).entries()]
+      .sort((a, b) => a[1] - b[1])
+      .map(([member]) => JSON.parse(member) as { d: number; s: number; n: number });
+
+  it("writes one point per scored country, rounded to 3 dp, counting scored headlines", async () => {
+    const redis = createFakeRedis();
+    await persistCountries(
+      redis,
+      [
+        {
+          code: "us",
+          score: 0.123456,
+          articles: [{ title: "a", score: 0.5 }, { title: "b", score: -0.25 }, { title: "c", score: null }],
+        },
+      ],
+      500
+    );
+    expect(series(redis, "us")).toEqual([{ d: 500, s: 0.123, n: 2 }]); // 3rd article unscored
+    expect(redis._zsets.get(HISTORY_KEY("us"))!.size).toBe(1);
+  });
+
+  it("replaces the same day's point on a re-run instead of piling up", async () => {
+    const redis = createFakeRedis();
+    const day = 500;
+    await persistCountries(redis, [{ code: "us", score: 0.2, articles: [{ title: "a", score: 0.2 }] }], day);
+    await persistCountries(redis, [{ code: "us", score: -0.4, articles: [{ title: "a", score: -0.4 }] }], day);
+    expect(series(redis, "us")).toEqual([{ d: day, s: -0.4, n: 1 }]); // one member, latest wins
+  });
+
+  it("caps the series at HISTORY_MAX_DAYS, dropping the oldest day", async () => {
+    const redis = createFakeRedis();
+    const firstDay = 1000;
+    for (let i = 0; i <= HISTORY_MAX_DAYS; i++) { // one more day than the cap
+      await persistCountries(
+        redis,
+        [{ code: "us", score: 0.1, articles: [{ title: "a", score: 0.1 }] }],
+        firstDay + i
+      );
+    }
+    const points = series(redis, "us");
+    expect(points).toHaveLength(HISTORY_MAX_DAYS);
+    expect(points[0].d).toBe(firstDay + 1); // day 1000 evicted
+    expect(points[points.length - 1].d).toBe(firstDay + HISTORY_MAX_DAYS);
+  });
+
+  it("writes nothing for unscorable, transient, or terminal countries", async () => {
+    const redis = createFakeRedis();
+    await persistCountries(
+      redis,
+      [
+        { code: "gb", score: null, articles: [] },                            // nothing scorable
+        { code: "de", score: null, articles: [{ title: "x", score: null }] }, // scoring failed
+        { code: "fr", score: null, articles: [], status: "rate_limited" },    // transient
+        { code: "jp", score: null, articles: [], status: "unsupported" },     // terminal
+      ],
+      500
+    );
+    for (const code of ["gb", "de", "fr", "jp"]) {
+      expect(redis._zsets.has(HISTORY_KEY(code))).toBe(false); // gaps are honest data
+    }
   });
 });
 
