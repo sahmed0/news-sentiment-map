@@ -1,7 +1,7 @@
 // src/components/CountryPanel.tsx
 import { useState } from "react";
 import { motion, AnimatePresence, useDragControls, type MotionProps, type PanInfo } from "framer-motion";
-import { sentimentBucket } from "../lib/sentiment";
+import { sentimentBucket, bucketColor, BUCKET_COLOR } from "../lib/sentiment";
 import { safeHttpUrl } from "../lib/url";
 import { SentimentFilter } from "./SentimentFilter";
 import { useIsMobile } from "../hooks/useMediaQuery";
@@ -124,12 +124,9 @@ function Headlines({ articles }: { articles: Article[] }) {
 function SentimentBar({ score }: { score: number }) {
   // score in [-1, 1]
   const pct = ((score + 1) / 2) * 100; // map to [0, 100]
-  const color =
-    score > 0.1
-      ? "rgb(var(--c-positive-rgb))"
-      : score < -0.1
-      ? "rgb(var(--c-negative-rgb))"
-      : "rgb(var(--c-neutral-rgb))";
+  // score is always numeric here, so bucketColor never returns null - the
+  // fallback only keeps the type a plain string.
+  const color = bucketColor(score) ?? BUCKET_COLOR.neutral;
 
   const label =
     score > 0.5
