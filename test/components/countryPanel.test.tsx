@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import type { Article, CountryResult, HistoryPoint } from "../../shared/types";
+import { render, screen, cleanup } from "@testing-library/react";
+import type { CountryResult, HistoryPoint } from "../../shared/types";
 
 // The panel's only new dependency is the history hook; mocking it is what lets
 // this file stand in for a browser check against real /api/history data.
