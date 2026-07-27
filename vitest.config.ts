@@ -8,6 +8,9 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["test/**/*.test.{ts,tsx,js,jsx}"],
+    // Stubs the browser APIs jsdom lacks (matchMedia, ResizeObserver); a no-op
+    // in the node-environment files.
+    setupFiles: ["test/setup.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],

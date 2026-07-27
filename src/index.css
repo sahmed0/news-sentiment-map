@@ -24,9 +24,12 @@
   --panel-rgb: 20 25 40;
   --map-empty: #222937;
   --map-dimmed-opacity: 0.20;
-  --c-positive-rgb: 0 255 0;
-  --c-neutral-rgb: 240 200 0;
-  --c-negative-rgb: 255 0 0;
+  /* Text-readable members of the map ramp's families (ColorBrewer RdYlBu-5
+     reversed), tuned per theme so chips and bars stay legible on panel
+     backgrounds while still reading as the same scale as the map. */
+  --c-positive-rgb: 93 168 216;   /* lightened #2c7bb6 for dark bg */
+  --c-neutral-rgb: 253 174 97;    /* #fdae61 */
+  --c-negative-rgb: 236 88 80;    /* lightened #d7191c for dark bg */
   color-scheme: dark;
 }
 
@@ -36,9 +39,9 @@
   --panel-rgb: 250 250 249;
   --map-empty: #ffffff;
   --map-dimmed-opacity: 0.20;
-  --c-positive-rgb: 22 163 74;
-  --c-neutral-rgb: 230 160 32;
-  --c-negative-rgb: 220 38 38;
+  --c-positive-rgb: 34 103 158;   /* #22679e */
+  --c-neutral-rgb: 200 122 30;    /* darkened amber, readable on light panels */
+  --c-negative-rgb: 191 27 30;    /* #bf1b1e */
   color-scheme: light;
 }
 

@@ -1,12 +1,20 @@
 // src/components/CountryPanel.tsx
 import { useState } from "react";
 import { motion, AnimatePresence, useDragControls, type MotionProps, type PanInfo } from "framer-motion";
-import { sentimentBucket } from "../lib/sentiment";
+import { sentimentBucket, bucketColor, BUCKET_COLOR } from "../lib/sentiment";
 import { safeHttpUrl } from "../lib/url";
 import { SentimentFilter } from "./SentimentFilter";
+import { Sparkline } from "./Sparkline";
+import { computeDelta7d } from "../lib/history";
 import { useIsMobile } from "../hooks/useMediaQuery";
+import { useCountryHistory } from "../hooks/useCountryHistory";
 import { X } from 'lucide-react';
 import type { Article, CountryResult, FilterKey } from "../../shared/types";
+
+// Below MIN_HISTORY_POINTS there are not enough data points
+// to justify showing a trend chart, so the chart stays hidden
+// and the panel explains why.
+const MIN_HISTORY_POINTS = 3;
 
 // Show the English translation only when it exists and actually differs from
 // the original (Azure echoes English text back unchanged for English headlines).
@@ -124,12 +132,9 @@ function Headlines({ articles }: { articles: Article[] }) {
 function SentimentBar({ score }: { score: number }) {
   // score in [-1, 1]
   const pct = ((score + 1) / 2) * 100; // map to [0, 100]
-  const color =
-    score > 0.1
-      ? "rgb(var(--c-positive-rgb))"
-      : score < -0.1
-      ? "rgb(var(--c-negative-rgb))"
-      : "rgb(var(--c-neutral-rgb))";
+  // score is always numeric here, so bucketColor never returns null - the
+  // fallback only keeps the type a plain string.
+  const color = bucketColor(score) ?? BUCKET_COLOR.neutral;
 
   const label =
     score > 0.5
@@ -164,6 +169,59 @@ function SentimentBar({ score }: { score: number }) {
           transition={{ duration: 0.6, ease: "easeOut" }}
         />
       </div>
+    </div>
+  );
+}
+
+// Direction chip for 7-day change. A move smaller than 0.005 rounds to 0.00
+// at two decimals, so it gets a neutral dot rather than an arrow
+// that would claim a direction the number doesn't show.
+function DeltaChip({ delta }: { delta: number }) {
+  const flat = Math.abs(delta) < 0.005;
+  const arrow = flat ? "·" : delta > 0 ? "▲" : "▼";
+  const sign = flat ? "" : delta > 0 ? "+" : "−";
+  const color = flat
+    ? "rgb(var(--fg-rgb) / 0.5)"
+    : delta > 0
+    ? BUCKET_COLOR.positive
+    : BUCKET_COLOR.negative;
+
+  return (
+    <span
+      className="text-[10px] font-bold tabular-nums"
+      style={{ color }}
+      title="Change since a week ago"
+    >
+      7d {arrow} {sign}
+      {Math.abs(delta).toFixed(2)}
+    </span>
+  );
+}
+
+// Daily history for one country. It arrives after the panel is already on
+// screen, so nothing renders until it resolves.
+function HistorySection({ code }: { code: string }) {
+  const { points, loading } = useCountryHistory(code);
+  if (loading) return null;
+
+  const enough = points.length >= MIN_HISTORY_POINTS;
+  const delta = enough ? computeDelta7d(points) : null;
+
+  return (
+    <div className="px-5 pb-4 shrink-0">
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-xs uppercase tracking-widest opacity-40 light:opacity-65">
+          30-day trend
+        </p>
+        {delta !== null && <DeltaChip delta={delta} />}
+      </div>
+      {enough ? (
+        <Sparkline points={points} />
+      ) : (
+        <p className="text-xs text-fg/40 light:text-black/50">
+          History accumulates daily — check back soon.
+        </p>
+      )}
     </div>
   );
 }
@@ -264,6 +322,10 @@ export function CountryPanel({ country, onClose }: CountryPanelProps) {
               <SentimentBar score={country.score} />
             </div>
           )}
+
+          {/* Daily sentiment history - absent until the country has been
+              scored on enough days (see HistorySection). */}
+          <HistorySection code={country.code} />
 
           {/* Headlines + sentiment filter */}
           <Headlines articles={country.articles ?? []} />

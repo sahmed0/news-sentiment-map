@@ -120,6 +120,8 @@ export interface RedisPipelineLike {
   expire(key: string, seconds: number): RedisPipelineLike;
   sadd(key: string, ...members: string[]): RedisPipelineLike;
   zadd(key: string, entry: { score: number; member: string }, ...entries: { score: number; member: string }[]): RedisPipelineLike;
+  zremrangebyscore(key: string, min: number, max: number): RedisPipelineLike;
+  zremrangebyrank(key: string, start: number, stop: number): RedisPipelineLike;
   get(key: string): RedisPipelineLike;
   exec(): Promise<unknown[]>;
 }
@@ -133,6 +135,8 @@ export interface RedisLike {
   sadd(key: string, ...members: string[]): Promise<number>;
   zadd(key: string, entry: { score: number; member: string }, ...entries: { score: number; member: string }[]): Promise<number | null>;
   zrange(key: string, start: number, stop: number, opts?: { withScores?: boolean }): Promise<(string | number)[]>;
+  zremrangebyscore(key: string, min: number, max: number): Promise<number>;
+  zremrangebyrank(key: string, start: number, stop: number): Promise<number>;
   mget(...keys: string[]): Promise<unknown[]>;
   pipeline(): RedisPipelineLike;
 }
@@ -149,4 +153,30 @@ export function parseCountryResult(v: unknown): CountryResult | null {
   if (!isRecord(v) || typeof v.code !== "string") return null;
   // Validated above; the double-assert is the guard narrowing its own input.
   return v as unknown as CountryResult;
+}
+
+// A history ZSET member as written by persistCountries: the day bucket, the
+// day's score and how many headlines it averaged. Compact keys because every
+// scored country writes one of these per day, forever (capped at HISTORY_MAX_DAYS).
+export interface StoredHistoryPoint {
+  d: number; // day bucket (the NewsData-shifted dayId), also the zset score
+  s: number; // score, rounded to 3 dp
+  n: number; // number of scored headlines behind `s`
+}
+
+// Narrow one raw ZSET member into a StoredHistoryPoint. A truncated write
+// or a hand-edited key must not crash a read, so a malformed point is
+// dropped so the rest of the series still serves.
+export function parseHistoryPoint(v: unknown): StoredHistoryPoint | null {
+  if (typeof v !== "string") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(v);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed)) return null;
+  const { d, s, n } = parsed;
+  if (!Number.isFinite(d) || !Number.isFinite(s) || !Number.isFinite(n)) return null;
+  return { d: Number(d), s: Number(s), n: Number(n) };
 }

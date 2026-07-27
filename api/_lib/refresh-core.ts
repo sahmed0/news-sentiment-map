@@ -9,6 +9,9 @@
 //   sentiment:done:<dayId>    -> SET of codes attempted today (prevents double-spend)
 //   sentiment:credits:nd:day:<dayId>    -> NewsData credit ledger (day shifted to NewsData's 1am reset)
 //   sentiment:credits:gn:day:<gnDayId>  -> GNews credit ledger (plain midnight-UTC day)
+//   sentiment:history:<code>  -> ZSET, score = dayId, member = JSON {d,s,n}: one
+//                                point per country per scored day, capped at
+//                                HISTORY_MAX_DAYS (served by api/history.ts)
 //
 // Headlines come from two providers with independent quotas, so the ledger is
 // split: high-priority countries are fetched from GNews, the rest from NewsData
@@ -23,8 +26,12 @@ export const AGG_KEY = "sentiment:world";
 const COUNTRY_KEY = (code: string): string => `sentiment:country:${code}`;
 const FRESH_KEY = "sentiment:freshness";
 const DONE_KEY = (dayId: number): string => `sentiment:done:${dayId}`;
-const ND_CREDIT_DAY_KEY = (dayId: number): string => `sentiment:credits:nd:day:${dayId}`;
-const GN_CREDIT_DAY_KEY = (dayId: number): string => `sentiment:credits:gn:day:${dayId}`;
+export const ND_CREDIT_DAY_KEY = (dayId: number): string => `sentiment:credits:nd:day:${dayId}`;
+export const GN_CREDIT_DAY_KEY = (dayId: number): string => `sentiment:credits:gn:day:${dayId}`;
+export const HISTORY_KEY = (code: string): string => `sentiment:history:${code}`;
+// A year of daily points per country for trend analysis: small enough
+// (~40 bytes a point) that the ZSETs never grow unbounded.
+export const HISTORY_MAX_DAYS = 365;
 
 // NewsData free tier: 200 credits / day. Stay a margin under it. NEWSDATA_MAX_PER_TICK
 // bounds the NewsData work in a single cron tick (each country is fetched + scored
@@ -313,7 +320,7 @@ interface PersistResult {
   code: string;
   score: number | null;
   status?: string;
-  articles?: ReadonlyArray<{ title?: string | null }>;
+  articles?: ReadonlyArray<{ title?: string | null; score?: number | null }>;
 }
 
 // Persist results. A country counts as refreshed only when it actually produced
@@ -336,12 +343,25 @@ export async function persistCountries(redis: RedisLike, results: readonly Persi
 
   for (const c of results) {
     const articles = c.articles ?? [];
-    const scored = articles.length > 0 && typeof c.score === "number";
+    const score = c.score; // const so the `scored` check below narrows it to number
+    const scored = articles.length > 0 && typeof score === "number";
     const scorable = articles.length > 0 && articles.some((a) => a.title);
     if (scored) {
       p.set(COUNTRY_KEY(c.code), c);
       p.zadd(FRESH_KEY, { score: now, member: c.code });
       p.sadd(DONE_KEY(day), c.code);
+      // One history point per country per day. The member encodes the score, so
+      // a second run on the same day would otherwise add a SECOND member at the
+      // same zset score - clear the day's range first to keep the write
+      // idempotent, then trim to the newest HISTORY_MAX_DAYS.
+      const point = {
+        d: day,
+        s: Math.round(score * 1000) / 1000,
+        n: articles.filter((a) => typeof a.score === "number").length,
+      };
+      p.zremrangebyscore(HISTORY_KEY(c.code), day, day);
+      p.zadd(HISTORY_KEY(c.code), { score: day, member: JSON.stringify(point) });
+      p.zremrangebyrank(HISTORY_KEY(c.code), 0, -(HISTORY_MAX_DAYS + 1));
       refreshed.push(c.code);
     } else if (scorable || isTransientStatus(c.status)) {
       // Leave untouched -> retried next tick. `scorable` = had headline text but

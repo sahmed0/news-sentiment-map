@@ -1,6 +1,7 @@
 // src/components/Legend.tsx
 import { useState } from "react";
 import { useIsMobile } from "../hooks/useMediaQuery";
+import { legendGradientCss, BUCKET_COLOR } from "../lib/sentiment";
 import type { CountryResult } from "../../shared/types";
 
 interface LegendProps {
@@ -8,12 +9,6 @@ interface LegendProps {
   lastUpdated: Date | null;
   fromCache: boolean;
 }
-
-const GRADIENT_STOPS = [
-  { pct: "0%", color: "#ff0000" },
-  { pct: "50%", color: "#ffff00" },
-  { pct: "100%", color: "#00ff00" },
-];
 
 export function Legend({ data, lastUpdated, fromCache }: LegendProps) {
   const isMobile = useIsMobile();
@@ -68,11 +63,7 @@ export function Legend({ data, lastUpdated, fromCache }: LegendProps) {
           <p className="uppercase tracking-widest opacity-60 mb-2">Sentiment</p>
           <div
             className="h-2 rounded-full mb-1"
-            style={{
-              background: `linear-gradient(to right, ${GRADIENT_STOPS.map(
-                (s) => `${s.color} ${s.pct}`
-              ).join(", ")})`,
-            }}
+            style={{ background: legendGradientCss() }}
           />
           <div className="flex justify-between opacity-60">
             <span>Negative</span>
@@ -89,7 +80,7 @@ export function Legend({ data, lastUpdated, fromCache }: LegendProps) {
               {top3.map((c) => (
                 <div key={c.code} className="flex justify-between gap-1 mb-1">
                   <span className="opacity-70 truncate">{c.name}</span>
-                  <span style={{ color: "#00dd00" }} className="font-bold shrink-0">
+                  <span style={{ color: BUCKET_COLOR.positive }} className="font-bold shrink-0">
                     +{c.score.toFixed(2)}
                   </span>
                 </div>
@@ -100,7 +91,7 @@ export function Legend({ data, lastUpdated, fromCache }: LegendProps) {
               {bottom3.map((c) => (
                 <div key={c.code} className="flex justify-between gap-1 mb-1">
                   <span className="opacity-70 truncate">{c.name}</span>
-                  <span style={{ color: "#ff0000" }} className="font-bold shrink-0">
+                  <span style={{ color: BUCKET_COLOR.negative }} className="font-bold shrink-0">
                     {c.score.toFixed(2)}
                   </span>
                 </div>
