@@ -26,6 +26,8 @@ export const AGG_KEY = "sentiment:world";
 const COUNTRY_KEY = (code: string): string => `sentiment:country:${code}`;
 const FRESH_KEY = "sentiment:freshness";
 const DONE_KEY = (dayId: number): string => `sentiment:done:${dayId}`;
+export const ND_CREDIT_DAY_KEY = (dayId: number): string => `sentiment:credits:nd:day:${dayId}`;
+export const GN_CREDIT_DAY_KEY = (dayId: number): string => `sentiment:credits:gn:day:${dayId}`;
 export const HISTORY_KEY = (code: string): string => `sentiment:history:${code}`;
 // A year of daily points per country for trend analysis: small enough
 // (~40 bytes a point) that the ZSETs never grow unbounded.
