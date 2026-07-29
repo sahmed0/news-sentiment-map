@@ -65,7 +65,22 @@ describe("GET /api/sentiment", () => {
     await call(res);
     expect(res.statusCode).toBe(503);
     expect(res.headers["Retry-After"]).toBe("15");
+    // The warming state must never be cached at the edge.
+    expect(res.headers["Cache-Control"]).toBe("no-store");
     expect(res.body.error).toMatch(/warming/i);
+  });
+
+  it("degrades to a 503 instead of throwing when Redis is unreachable", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {}); // handler logs the outage
+    vi.mocked(Redis).mockImplementation(function () {
+      return { get: vi.fn().mockRejectedValue(new Error("upstash down")) } as any;
+    });
+    const res = mockRes();
+    await expect(call(res)).resolves.toBeDefined(); // no unhandled rejection
+    expect(res.statusCode).toBe(503);
+    expect(res.headers["Cache-Control"]).toBe("no-store");
+    expect(res.headers["Retry-After"]).toBe("30");
+    expect(res.body).toEqual({ error: "Data temporarily unavailable" });
   });
 
   it("serves the aggregate with cached flag", async () => {
@@ -79,6 +94,8 @@ describe("GET /api/sentiment", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.cached).toBe(true);
     expect(res.body.data).toHaveLength(2);
-    expect(res.headers["Access-Control-Allow-Origin"]).toBe("*");
+    expect(res.headers["Cache-Control"]).toBe("public, s-maxage=300, stale-while-revalidate=3600");
+    // Same-origin frontend: open CORS would only invite quota-burning hotlinks.
+    expect(res.headers["Access-Control-Allow-Origin"]).toBeUndefined();
   });
 });
