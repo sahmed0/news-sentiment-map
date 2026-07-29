@@ -68,10 +68,33 @@ afterEach(() => {
 });
 
 describe("POST /api/cron/refresh - guards", () => {
-  it("rejects a request without the correct Bearer CRON_SECRET", async () => {
+  it("rejects a token of a different length (length guard, before timingSafeEqual)", async () => {
     const res = mockRes();
-    await call(asReq({ authorization: "Bearer wrong" }), res);
+    await call(asReq({ authorization: "Bearer wrong" }), res); // shorter than "Bearer secret"
     expect(res.statusCode).toBe(401);
+    expect(Redis).not.toHaveBeenCalled();
+  });
+
+  it("rejects a wrong token of the same length (constant-time compare)", async () => {
+    const res = mockRes();
+    await call(asReq({ authorization: "Bearer secreT" }), res);
+    expect(res.statusCode).toBe(401);
+    expect(Redis).not.toHaveBeenCalled();
+  });
+
+  it("rejects a request with no authorization header at all", async () => {
+    const res = mockRes();
+    await call(asReq(), res);
+    expect(res.statusCode).toBe(401);
+    expect(Redis).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with 500 when CRON_SECRET is unset", async () => {
+    vi.stubEnv("CRON_SECRET", "");
+    const res = mockRes();
+    await call(authedReq(), res);
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual({ error: "CRON_SECRET not configured" });
     expect(Redis).not.toHaveBeenCalled();
   });
 

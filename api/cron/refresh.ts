@@ -5,6 +5,7 @@
 // Bearer CRON_SECRET that QStash forwards via Upstash-Forward-Authorization.
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { timingSafeEqual } from "node:crypto";
 import { fetchCountries } from "../_lib/sentiment-fetch.js";
 import {
   selectDueCountries,
@@ -29,8 +30,14 @@ const LOCK_TTL = 300; // seconds
 export const config = { maxDuration: 300 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const authHeader = req.headers.authorization;
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  // Fail closed if the secret is unset - otherwise the expected value would be
+  // the guessable literal "Bearer undefined".
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return res.status(500).json({ error: "CRON_SECRET not configured" });
+  const expected = Buffer.from(`Bearer ${secret}`);
+  const provided = Buffer.from(req.headers.authorization ?? "");
+  // timingSafeEqual throws on length mismatch - guard first (length is not secret here).
+  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
