@@ -164,16 +164,19 @@ export interface StoredHistoryPoint {
   n: number; // number of scored headlines behind `s`
 }
 
-// Narrow one raw ZSET member into a StoredHistoryPoint. A truncated write
-// or a hand-edited key must not crash a read, so a malformed point is
-// dropped so the rest of the series still serves.
+// Narrow one raw ZSET member into a StoredHistoryPoint. The value arrives either
+// as the JSON string persistCountries wrote or as an already-parsed object (the
+// Upstash client's automatic deserialization JSON-parses every string in a
+// command's response, including ZSET members). A truncated write or a hand-edited key must not crash a
+// read, so a malformed point is dropped so the rest of the series still serves.
 export function parseHistoryPoint(v: unknown): StoredHistoryPoint | null {
-  if (typeof v !== "string") return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(v);
-  } catch {
-    return null;
+  let parsed: unknown = v;
+  if (typeof v === "string") {
+    try {
+      parsed = JSON.parse(v);
+    } catch {
+      return null;
+    }
   }
   if (!isRecord(parsed)) return null;
   const { d, s, n } = parsed;
