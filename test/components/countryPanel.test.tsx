@@ -46,6 +46,9 @@ describe("CountryPanel history section", () => {
     expect(container.querySelector("svg polyline")).toBeTruthy();
     expect(screen.getByText(/7d/).textContent?.replace(/\s+/g, " ")).toBe("7d ▲ +0.30");
     expect(screen.queryByText(/History accumulates daily/)).toBeNull();
+    // Caption: earliest scored day (Jul 1, +0.10) on the left, current (Jul 8, +0.40) on the right.
+    expect(screen.getByText("Jul 1").querySelector("span")?.textContent).toBe("+0.10");
+    expect(screen.getByText("Jul 8").querySelector("span")?.textContent).toBe("+0.40");
   });
 
   it("marks a fall with a down arrow and a minus sign", () => {
