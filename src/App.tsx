@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { WorldMap } from "./components/WorldMap";
 import { CountryPanel } from "./components/CountryPanel";
 import { Legend } from "./components/Legend";
@@ -31,6 +31,13 @@ export default function App() {
     }
     return counts;
   }, [data]);
+
+  // Stable identity: WorldMap forwards this to a memoized path layer, which a
+  // fresh arrow on every render would defeat.
+  const handleSelectCountry = useCallback((country: CountryResult) => {
+    setSelectedCountry(country);
+    setShowInfo(false);
+  }, []);
 
   const btnStyle = {
     background: "rgb(var(--fg-rgb) / 0.08)",
@@ -156,12 +163,9 @@ export default function App() {
       <div className="w-full h-full" onClick={() => { setSelectedCountry(null); setShowInfo(false); }}>
         <WorldMap
           byCode={byCode}
-          selectedCountry={selectedCountry}
+          selectedCode={selectedCountry?.code?.toUpperCase() ?? null}
           sentimentFilter={sentimentFilter}
-          onSelectCountry={(country) => {
-            setSelectedCountry(country);
-            setShowInfo(false);
-          }}
+          onSelectCountry={handleSelectCountry}
         />
       </div>
 

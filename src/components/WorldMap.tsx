@@ -1,26 +1,27 @@
 // src/components/WorldMap.tsx
-// Uses d3-geo + topojson-client directly - no React 18 wrapper dependency
+// Uses d3-geo + topojson-client directly
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { geoNaturalEarth1, geoPath, type GeoPath } from "d3-geo";
+import { geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
-import { scaleLinear } from "d3-scale";
 import { zoom, zoomIdentity, type ZoomBehavior, type D3ZoomEvent } from "d3-zoom";
 import { select } from "d3-selection";
 import isoCountries from "i18n-iso-countries";
-import en from "i18n-iso-countries/langs/en.json";
-import { sentimentBucket } from "../lib/sentiment";
+import topo from "world-atlas/countries-110m.json";
+import { bucketColor } from "../lib/sentiment";
+import { numericToAlpha2, dominantCentroid } from "../lib/geo";
+import { CountryPaths } from "./CountryPaths";
 import type { CountryResult, FilterKey } from "../../shared/types";
-import type { Feature, FeatureCollection, Polygon } from "geojson";
+import type { Feature, FeatureCollection } from "geojson";
 import type { Topology, GeometryCollection } from "topojson-specification";
 
-isoCountries.registerLocale(en);
+// A JSON import is inferred structurally, so assert the shape feature() needs.
+const world = topo as unknown as Topology<{ countries: GeometryCollection }>;
 
-const GEO_URL =
-  "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
+const countries = feature(world, world.objects.countries).features as Feature[];
 
 interface WorldMapProps {
   byCode: Record<string, CountryResult>;
-  selectedCountry: CountryResult | null;
+  selectedCode: string | null; // UPPERCASE alpha-2 of the selected country, or null
   onSelectCountry: (country: CountryResult) => void;
   sentimentFilter?: FilterKey;
 }
@@ -33,43 +34,10 @@ interface LabelCandidate {
   area: number;
 }
 
-// Derive ISO numeric → alpha-2 from i18n-iso-countries so every country in the
-// topojson resolves, not just a hardcoded subset. The library expects the
-// numeric code without leading zeros (e.g. "76" → "BR"), so strip padding.
-const numericToAlpha2 = (numId: string): string | undefined =>
-  isoCountries.numericToAlpha2(String(parseInt(numId, 10)));
-
-// For MultiPolygon countries (France, USA, Russia, etc.) the full-feature
-// centroid is pulled toward distant overseas territories. Use the largest
-// sub-polygon's centroid instead so the label lands on the main landmass.
-function dominantCentroid(pathGen: GeoPath, feature: Feature): [number, number] {
-  const { geometry } = feature;
-  if (geometry?.type !== "MultiPolygon") return pathGen.centroid(feature);
-  let best: Feature<Polygon> | null = null;
-  let bestArea = -Infinity;
-  for (const coords of geometry.coordinates) {
-    const poly: Feature<Polygon> = {
-      type: "Feature",
-      properties: null,
-      geometry: { type: "Polygon", coordinates: coords },
-    };
-    const area = pathGen.area(poly);
-    if (area > bestArea) { bestArea = area; best = poly; }
-  }
-  return best ? pathGen.centroid(best) : pathGen.centroid(feature);
-}
-
-// Range is typed string (color hex codes) so the scale interpolates colors.
-const colorScale = scaleLinear<string>()
-  .domain([-1, -0.1, 0, 0.1, 1]) // Narrow neutral zone to emphasise positive & negative colours
-  .range(["#ff0000", "#ffbb00", "#ffff00", "#bcff00", "#00ff00"])
-  .clamp(true);
-
-export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFilter = "all" }: WorldMapProps) {
+export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilter = "all" }: WorldMapProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const gRef = useRef<SVGGElement | null>(null); // the <g> we apply zoom transforms to
   const zoomBehaviorRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null); // d3-zoom behavior, so resize can update its extent
-  const [countries, setCountries] = useState<Feature[]>([]);
   const [paths, setPaths] = useState<Record<string, string | null>>({}); // { numericId: svgPathString }
   const [centroids, setCentroids] = useState<Record<string, [number, number]>>({}); // { numericId: [x, y] }
   const [areas, setAreas] = useState<Record<string, number>>({}); // { numericId: projectedAreaPx² }
@@ -146,32 +114,16 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
     ]);
   }, []);
 
-  // -- Load & project topojson ------------------------------------------------
+  // -- Project the (static) topojson once the SVG has been laid out -----------
+  // The ResizeObserver below also fires on observe, but not in environments
+  // that lack it (jsdom), so the initial projection is explicit.
   useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      const res = await fetch(GEO_URL);
-      // The fetched JSON is untyped at this boundary;
-      // assert the world-atlas topology shape topojson-client needs
-      const topo = (await res.json()) as unknown as Topology;
-      if (cancelled) return;
-
-      const { features } = feature(
-        topo,
-        topo.objects.countries as GeometryCollection
-      ) as FeatureCollection;
-      setCountries(features);
-      projectFeatures(features);
-    }
-
-    load();
-    return () => { cancelled = true; };
+    projectFeatures(countries);
   }, [projectFeatures]);
 
   // -- Reproject on container resize (orientation change, window resize) -------
   useEffect(() => {
-    if (!svgRef.current || countries.length === 0) return;
+    if (!svgRef.current) return;
 
     let frame = 0;
     const ro = new ResizeObserver(() => {
@@ -185,7 +137,7 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
       cancelAnimationFrame(frame);
       ro.disconnect();
     };
-  }, [countries, projectFeatures]);
+  }, [projectFeatures]);
 
   // -- d3-zoom setup ---------------------------------------------------------
   useEffect(() => {
@@ -221,7 +173,7 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
     return () => {
       svgSel.on(".zoom", null);
     };
-  }, [countries.length]); // re-attach once countries are loaded
+  }, []);
 
   // -- Hover tooltip handler -------------------------------------------------
   const handleMouseMove = useCallback((e: React.MouseEvent, name: string, score: number | null | undefined) => {
@@ -290,7 +242,7 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
     }
 
     return visible;
-  }, [countries, centroids, areas, zoomK, byCode]);
+  }, [centroids, areas, zoomK, byCode]); // `countries` is module-scope static data
 
   return (
     <div className="relative w-full h-full">
@@ -302,54 +254,18 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
         style={{ cursor: "grab", touchAction: "none" }}
       >
         <g ref={gRef}>
-          {/* Country paths */}
-          {countries.map((f, i) => {
-            if (f.id == null) return null;
-            const numId = String(f.id).padStart(3, "0");
-            const alpha2 = numericToAlpha2(numId);
-            const countryData = alpha2 ? byCode[alpha2] : null;
-            const score = countryData?.score;
-            const numericScore = typeof score === "number" ? score : null;
-            const hasData = numericScore !== null;
-            const isSelected = alpha2 && selectedCountry?.code?.toUpperCase() === alpha2;
-            // Dim countries that don't match the active sentiment filter so the
-            // matching ones stand out. Unscored countries are dimmed too while filtering.
-            const dimmed =
-              sentimentFilter !== "all" &&
-              (!hasData || sentimentBucket(score) !== sentimentFilter);
-            const d = paths[numId];
-            if (!d) return null;
-
-            return (
-              <path
-                key={`${numId}-${i}`}
-                d={d}
-                strokeWidth={0.4}
-                style={{
-                  // fill/stroke/opacity via CSS so var() theme tokens resolve.
-                  fill: isSelected ? "#3b82f6" : (numericScore !== null ? colorScale(numericScore) : "var(--map-empty)"),
-                  stroke: "rgb(var(--bg-rgb))",
-                  opacity: dimmed ? "var(--map-dimmed-opacity)" : isSelected ? 1 : 0.88,
-                  cursor: hasData ? "pointer" : "default",
-                  filter: isSelected
-                    ? "brightness(1.3) drop-shadow(0 0 5px rgb(var(--fg-rgb)/0.5))"
-                    : undefined,
-                  transition: "opacity 0.15s, filter 0.15s",
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (hasData && countryData) onSelectCountry(countryData);
-                }}
-                onMouseMove={(e) =>
-                  handleMouseMove(e, countryData?.name ?? numId, score)
-                }
-                onMouseEnter={(e) =>
-                  handleMouseMove(e, countryData?.name ?? numId, score)
-                }
-                onMouseLeave={handleMouseLeave}
-              />
-            );
-          })}
+          {/* Country paths - memoized so a zoom gesture, which re-renders this
+              component on every frame via zoomK, doesn't redraw ~155 paths. */}
+          <CountryPaths
+            features={countries}
+            paths={paths}
+            byCode={byCode}
+            selectedCode={selectedCode}
+            sentimentFilter={sentimentFilter}
+            onSelectCountry={onSelectCountry}
+            onHover={handleMouseMove}
+            onHoverEnd={handleMouseLeave}
+          />
           {/* Country name labels — collision-filtered by visibleLabels memo.
               Labels are sorted largest-first so big countries always win when
               two candidates' bboxes overlap. */}
@@ -397,14 +313,7 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
           {tooltip.score !== undefined && tooltip.score !== null && (
             <span
               className="ml-2 font-bold"
-              style={{
-                color:
-                  tooltip.score > 0.1
-                    ? "#00dd00"
-                    : tooltip.score < -0.1
-                    ? "#ff0000"
-                    : "#F3B120",
-              }}
+              style={{ color: bucketColor(tooltip.score) ?? undefined }}
             >
               {tooltip.score >= 0 ? "+" : ""}
               {tooltip.score.toFixed(2)}
@@ -413,13 +322,11 @@ export function WorldMap({ byCode, selectedCountry, onSelectCountry, sentimentFi
         </div>
       )}
 
-      {/* Zoom hint */}
-      {countries.length > 0 && (
-        <p className="absolute bottom-20 right-4 sm:bottom-2 mb-[env(safe-area-inset-bottom)] text-[10px] opacity-60 pointer-events-none text-right">
-          <span className="md:hidden">Pinch to zoom · Double-tap to reset</span>
-          <span className="hidden md:inline">Scroll to zoom · Double-click to reset</span>
-        </p>
-      )}
+      {/* Zoom hint - the topology is bundled, so the map is never empty. */}
+      <p className="absolute bottom-20 right-4 sm:bottom-2 mb-[env(safe-area-inset-bottom)] text-[10px] opacity-60 pointer-events-none text-right">
+        <span className="md:hidden">Pinch to zoom · Double-tap to reset</span>
+        <span className="hidden md:inline">Scroll to zoom · Double-click to reset</span>
+      </p>
     </div>
   );
 }
