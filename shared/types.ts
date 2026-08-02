@@ -188,3 +188,30 @@ export function parseHistoryPoint(v: unknown): StoredHistoryPoint | null {
   if (!Number.isFinite(d) || !Number.isFinite(s) || !Number.isFinite(n)) return null;
   return { d: Number(d), s: Number(s), n: Number(n) };
 }
+
+// Narrow one entry of the tick list into a TickSummary. The value arrives either
+// as the JSON string recordTick wrote or as an already-parsed object (the Upstash
+// client deserializes responses it recognises), so both forms are accepted. A
+// truncated or older-shaped entry reads as "no tick" rather than crashing the
+// health check - the one read that must never fail is the one that says whether
+// everything else is failing.
+export function parseTickSummary(v: unknown): TickSummary | null {
+  let parsed: unknown = v;
+  if (typeof v === "string") {
+    try {
+      parsed = JSON.parse(v);
+    } catch {
+      return null;
+    }
+  }
+  if (!isRecord(parsed)) return null;
+  if (typeof parsed.ts !== "string") return null; // the timestamp drives every status decision
+  const counters = ["ok", "attempted", "aggregate", "tzDue", "backfill", "gnUsedDay", "ndUsedDay", "refunded", "ms"] as const;
+  const out = { ts: parsed.ts } as TickSummary;
+  for (const k of counters) {
+    if (!Number.isFinite(parsed[k])) return null;
+    out[k] = Number(parsed[k]);
+  }
+  if (typeof parsed.error === "string") out.error = parsed.error;
+  return out;
+}
