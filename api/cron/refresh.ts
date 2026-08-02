@@ -14,9 +14,11 @@ import {
   refundCounts,
   persistCountries,
   rebuildAggregate,
+  recordTick,
 } from "../_lib/refresh-core.js";
-import { log, err, now, since } from "../_lib/logger.js";
+import { log, warn, err, now, since } from "../_lib/logger.js";
 import type { FetchStats } from "../_lib/sentiment-fetch.js";
+import type { TickSummary } from "../../shared/types.js";
 
 const LOCK_KEY = "sentiment:refresh:lock";
 // Match maxDuration (300 s) so the lock can't expire mid-tick and let a second
@@ -56,6 +58,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const t0 = now();
+  // Every exit leaves a summary behind so /api/health can answer "did the pipeline
+  // run, and did it work?" without the Vercel logs. A failed summary write must
+  // never turn a healthy tick into a 500.
+  const safeRecord = async (summary: TickSummary): Promise<void> => {
+    try {
+      await recordTick(redis, summary);
+    } catch (e) {
+      warn("Tick", "record_failed", { message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   try {
     const selection = await selectDueCountries(redis);
     const { subset, diag } = selection;
@@ -67,6 +80,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const count = await rebuildAggregate(redis);
       const reason = diag.budget <= 0 ? "budget_exhausted" : "all_done";
       log("Tick", "idle", { reason, aggregate: count, ms: since(t0) });
+      // An idle tick attempted nothing, so every counter is zero - but it still
+      // proves the cron fired, which is what the health status turns on.
+      await safeRecord({
+        ts: new Date().toISOString(),
+        ok: 0,
+        attempted: 0,
+        aggregate: count,
+        tzDue: 0,
+        backfill: 0,
+        gnUsedDay: 0,
+        ndUsedDay: 0,
+        refunded: 0,
+        ms: since(t0),
+      });
       return res.status(200).json({ ok: true, refreshed: [], aggregate: count, debug: { reason, selection: diag } });
     }
 
@@ -96,6 +123,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ...stats.timings,
       ms: since(t0),
     });
+    await safeRecord({
+      ts: new Date().toISOString(),
+      ok: refreshed.length,
+      attempted: subset.length,
+      aggregate,
+      tzDue: diag.tzDue,
+      backfill: diag.backfill,
+      gnUsedDay: diag.gnUsedDay,
+      ndUsedDay: diag.ndUsedDay,
+      refunded: refunded.newsdata + refunded.gnews,
+      ms: since(t0),
+    });
     return res.status(200).json({
       ok: true,
       refreshed,
@@ -115,6 +154,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const message = e instanceof Error ? e.message : String(e);
     err("Tick", "error", { message, ms: since(t0) });
     console.error(e instanceof Error ? e.stack : e);
+    // A failed tick is the one the health endpoint most needs to see, so the
+    // summary carries the reason rather than simply being absent.
+    await safeRecord({
+      ts: new Date().toISOString(),
+      ok: 0,
+      attempted: 0,
+      aggregate: 0,
+      tzDue: 0,
+      backfill: 0,
+      gnUsedDay: 0,
+      ndUsedDay: 0,
+      refunded: 0,
+      ms: since(t0),
+      error: message,
+    });
     return res.status(500).json({ ok: false, error: message });
   } finally {
     await redis.del(LOCK_KEY);
