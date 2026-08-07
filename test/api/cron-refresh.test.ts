@@ -13,6 +13,7 @@ vi.mock("../../api/_lib/refresh-core.js", () => ({
   refundCounts: vi.fn(() => ({ newsdata: 0, gnews: 0 })),
   persistCountries: vi.fn(),
   rebuildAggregate: vi.fn(),
+  recordTick: vi.fn(),
 }));
 
 import handler from "../../api/cron/refresh.js";
@@ -25,6 +26,7 @@ import {
   refundCounts,
   persistCountries,
   rebuildAggregate,
+  recordTick,
 } from "../../api/_lib/refresh-core.js";
 
 const LOCK_KEY = "sentiment:refresh:lock";
@@ -59,6 +61,7 @@ beforeEach(() => {
   vi.stubEnv("KV_REST_API_URL", "https://fake");
   vi.stubEnv("KV_REST_API_TOKEN", "tok");
   vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -166,6 +169,82 @@ describe("POST /api/cron/refresh - orchestration", () => {
     expect(res.body.debug.reason).toBe("budget_exhausted");
     expect(reserveCredits).not.toHaveBeenCalled();
     expect(fetchCountries).not.toHaveBeenCalled();
+  });
+
+  it("records a tick summary describing the work it did", async () => {
+    vi.mocked(Redis).mockImplementation(function () { return createFakeRedis() as any; });
+    vi.mocked(selectDueCountries).mockResolvedValue({
+      subset: [{ code: "us" }, { code: "gb" }],
+      counts: { gnews: 2, newsdata: 0 },
+      dayId: 1,
+      gnDayId: 2,
+      diag: { budget: 5, tzDue: 1, backfill: 1, gnUsedDay: 12, ndUsedDay: 34 },
+    } as any);
+    vi.mocked(fetchCountries).mockResolvedValue([] as any);
+    vi.mocked(refundCounts).mockReturnValue({ newsdata: 3, gnews: 4 });
+    vi.mocked(persistCountries).mockResolvedValue(["us"]);
+    vi.mocked(rebuildAggregate).mockResolvedValue(150);
+
+    await call(authedReq(), mockRes());
+
+    expect(recordTick).toHaveBeenCalledTimes(1);
+    const summary = vi.mocked(recordTick).mock.calls[0][1];
+    expect(summary).toMatchObject({
+      ok: 1,
+      attempted: 2,
+      aggregate: 150,
+      tzDue: 1,
+      backfill: 1,
+      gnUsedDay: 12,
+      ndUsedDay: 34,
+      refunded: 7, // both providers' refunds summed
+    });
+    expect(typeof summary.ms).toBe("number");
+    expect(new Date(summary.ts).toISOString()).toBe(summary.ts);
+    expect(summary.error).toBeUndefined();
+    // The summary is stored as JSON, so it must survive a round trip unchanged.
+    expect(JSON.parse(JSON.stringify(summary))).toEqual(summary);
+  });
+
+  it("records a zeroed summary for an idle tick", async () => {
+    vi.mocked(Redis).mockImplementation(function () { return createFakeRedis() as any; });
+    vi.mocked(selectDueCountries).mockResolvedValue({ subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 1, gnDayId: 2, diag: { budget: 0 } } as any);
+    vi.mocked(rebuildAggregate).mockResolvedValue(7);
+
+    await call(authedReq(), mockRes());
+
+    expect(vi.mocked(recordTick).mock.calls[0][1]).toMatchObject({
+      ok: 0,
+      attempted: 0,
+      aggregate: 7, // the idle rebuild still counts
+      tzDue: 0,
+      backfill: 0,
+      refunded: 0,
+    });
+  });
+
+  it("records the failure reason when the tick throws", async () => {
+    vi.mocked(Redis).mockImplementation(function () { return createFakeRedis() as any; });
+    vi.mocked(selectDueCountries).mockRejectedValue(new Error("upstream down"));
+
+    await call(authedReq(), mockRes());
+
+    expect(vi.mocked(recordTick).mock.calls[0][1]).toMatchObject({ ok: 0, attempted: 0, aggregate: 0, error: "upstream down" });
+  });
+
+  it("still returns 200 when recording the summary fails", async () => {
+    const redis = createFakeRedis();
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
+    vi.mocked(selectDueCountries).mockResolvedValue({ subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 1, gnDayId: 2, diag: { budget: 0 } } as any);
+    vi.mocked(rebuildAggregate).mockResolvedValue(7);
+    vi.mocked(recordTick).mockRejectedValue(new Error("ticks key gone"));
+
+    const res = mockRes();
+    await call(authedReq(), res);
+
+    expect(res.statusCode).toBe(200); // bookkeeping must never fail a healthy tick
+    expect(res.body).toMatchObject({ ok: true, aggregate: 7 });
+    expect(redis._store.has(LOCK_KEY)).toBe(false);
   });
 
   it("returns 500 and still releases the lock when the tick throws", async () => {

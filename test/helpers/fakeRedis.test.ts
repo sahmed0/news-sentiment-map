@@ -64,3 +64,45 @@ describe("fakeRedis zremrangebyrank", () => {
     expect(await createFakeRedis().zremrangebyrank("k", 0, -1)).toBe(0);
   });
 });
+
+describe("fakeRedis list ops", () => {
+  it("lpush prepends so index 0 is the newest, and returns the new length", async () => {
+    const redis = createFakeRedis();
+    expect(await redis.lpush("l", "a")).toBe(1);
+    expect(await redis.lpush("l", "b")).toBe(2);
+    expect(await redis.lrange("l", 0, 0)).toEqual(["b"]); // newest first
+    expect(await redis.lrange("l", 0, -1)).toEqual(["b", "a"]);
+  });
+
+  it("lpush of several values reverses them, as Redis does", async () => {
+    const redis = createFakeRedis();
+    await redis.lpush("l", "a", "b", "c");
+    expect(await redis.lrange("l", 0, -1)).toEqual(["c", "b", "a"]);
+  });
+
+  it("lrange clamps out-of-range bounds and returns nothing when start > stop", async () => {
+    const redis = createFakeRedis({ lists: { l: ["a", "b", "c"] } });
+    expect(await redis.lrange("l", 0, 99)).toEqual(["a", "b", "c"]);
+    expect(await redis.lrange("l", -99, -1)).toEqual(["a", "b", "c"]);
+    expect(await redis.lrange("l", 2, 1)).toEqual([]);
+    expect(await redis.lrange("missing", 0, -1)).toEqual([]);
+  });
+
+  it("ltrim keeps the newest N - the tick cap's exact call", async () => {
+    const redis = createFakeRedis({
+      lists: { l: Array.from({ length: 150 }, (_, i) => `t${i}`) },
+    });
+    await redis.ltrim("l", 0, 99);
+    const kept = await redis.lrange("l", 0, -1);
+    expect(kept).toHaveLength(100);
+    expect(kept[0]).toBe("t0"); // head (newest) retained
+    expect(kept[99]).toBe("t99"); // everything older dropped
+  });
+
+  it("ltrim is a no-op on a missing key and drops the key on an empty range", async () => {
+    expect(await createFakeRedis().ltrim("l", 0, 99)).toBe("OK");
+    const redis = createFakeRedis({ lists: { l: ["a", "b"] } });
+    await redis.ltrim("l", 5, 1);
+    expect(redis._lists.has("l")).toBe(false);
+  });
+});
