@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { legendGradientCss, BUCKET_COLOR } from "../lib/sentiment";
+import { deriveRankings } from "../lib/rankings";
 import type { CountryResult } from "../../shared/types";
 
 interface LegendProps {
@@ -15,20 +16,7 @@ export function Legend({ data, lastUpdated, fromCache }: LegendProps) {
   // Collapsed by default on phones; expanded by default on desktop (toggleable everywhere).
   const [open, setOpen] = useState(() => !isMobile);
 
-  // Type predicate so the scored subset carries a non-null score - lets the sort
-  // and .toFixed below stay clean without per-use null checks.
-  const scored = data.filter(
-    (c): c is CountryResult & { score: number } => c.score !== null
-  );
-  const sorted = [...scored].sort((a, b) => b.score - a.score);
-  const top3 = sorted.slice(0, 3);
-  const bottom3 = sorted.slice(-3).reverse();
-
-  const newestFetchedAt = data.reduce<Date | null>((best, c) => {
-    if (!c.fetchedAt) return best;
-    const d = new Date(c.fetchedAt);
-    return !best || d > best ? d : best;
-  }, null);
+  const { scored, top3, bottom3, newestFetchedAt } = deriveRankings(data);
 
   return (
     <div className="absolute top-2 left-3 sm:top-auto sm:bottom-2 sm:left-2 mb-[env(safe-area-inset-bottom)] z-10">
