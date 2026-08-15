@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
-import type { CountryResult, HistoryPoint } from "../../shared/types";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import type { Article, CountryResult, HistoryPoint } from "../../shared/types";
 
 // The panel's only new dependency is the history hook; mocking it is what lets
 // this file stand in for a browser check against real /api/history data.
@@ -95,3 +95,127 @@ describe("CountryPanel history section", () => {
   });
 });
 
+const article = (over: Partial<Article> = {}): Article => ({
+  title: "A headline",
+  url: "https://example.com/a",
+  publishedAt: "2026-07-20T10:00:00.000Z",
+  language: "english",
+  score: 0.5,
+  translatedTitle: null,
+  ...over,
+});
+
+const withArticles = (articles: Article[]): CountryResult => ({ ...COUNTRY, articles });
+
+const renderPanel = (articles: Article[]) => {
+  mockHistory([]);
+  return render(<CountryPanel country={withArticles(articles)} onClose={() => {}} />);
+};
+
+describe("CountryPanel original-language line", () => {
+  it("shows the original title when the translation genuinely differs", () => {
+    renderPanel([article({ title: "Der Himmel ist blau", translatedTitle: "The sky is blue" })]);
+
+    expect(screen.getByText("The sky is blue")).toBeTruthy();
+    expect(screen.getByText(/Original:/).textContent).toBe("Original: Der Himmel ist blau");
+  });
+
+  it.each([
+    ["no translation", null],
+    ["an empty translation", ""],
+  ])("shows the untranslated title and no original line with %s", (_label, translatedTitle) => {
+    renderPanel([article({ title: "A headline", translatedTitle })]);
+
+    expect(screen.getByText("A headline")).toBeTruthy();
+    expect(screen.queryByText(/Original:/)).toBeNull();
+  });
+
+  it("shows no original line for a whitespace-only translation", () => {
+    const { container } = renderPanel([
+      article({ title: "A headline", translatedTitle: "   " }),
+    ]);
+
+    expect(screen.queryByText(/Original:/)).toBeNull();
+    // Documents current behavior, which is not ideal: a whitespace-only
+    // translation is truthy, so it wins over the original title and the
+    // headline renders blank. Never observed in production data (Azure returns
+    // either a translation or nothing), so it is recorded, not fixed here.
+    expect(container.querySelector("a")?.textContent?.trim()).toBe("");
+  });
+
+  it("shows no original line when the translation only differs in case and spacing", () => {
+    // Azure echoes English headlines back, sometimes with cosmetic differences;
+    // repeating the same sentence twice would just be noise.
+    renderPanel([article({ title: "The Sky Is Blue", translatedTitle: "  the sky is blue " })]);
+
+    expect(screen.queryByText(/Original:/)).toBeNull();
+  });
+});
+
+describe("CountryPanel headlines list", () => {
+  const MIXED = [
+    article({ title: "Good news", url: "https://example.com/1", score: 0.6 }),
+    article({ title: "Better news", url: "https://example.com/2", score: 0.4 }),
+    article({ title: "Flat news", url: "https://example.com/3", score: 0 }),
+    article({ title: "Bad news", url: "https://example.com/4", score: -0.7 }),
+  ];
+
+  // By role, not by text: the SentimentBar above the list renders its own
+  // "Positive (+0.25)" label, which a bare text query would also match.
+  const filter = (label: string) =>
+    screen.getByRole("button", { name: new RegExp(`^${label}`) });
+
+  it("counts each bucket, and counts every article under All", () => {
+    renderPanel(MIXED);
+
+    expect(filter("All").textContent).toBe("All 4");
+    expect(filter("Positive").textContent).toBe("Positive 2");
+    expect(filter("Neutral").textContent).toBe("Neutral 1");
+    expect(filter("Negative").textContent).toBe("Negative 1");
+  });
+
+  it("shows only the matching headlines once a filter is picked, and restores them", () => {
+    renderPanel(MIXED);
+
+    fireEvent.click(filter("Positive"));
+    expect(screen.getByText("Good news")).toBeTruthy();
+    expect(screen.getByText("Better news")).toBeTruthy();
+    expect(screen.queryByText("Flat news")).toBeNull();
+    expect(screen.queryByText("Bad news")).toBeNull();
+
+    fireEvent.click(filter("All"));
+    expect(screen.getByText("Bad news")).toBeTruthy();
+  });
+
+  it("explains an empty filter result differently from an empty country", () => {
+    renderPanel([article({ title: "Good news", score: 0.6 })]);
+    fireEvent.click(filter("Negative"));
+    expect(screen.getByText("No headlines match this filter.")).toBeTruthy();
+
+    cleanup();
+
+    renderPanel([]);
+    expect(screen.getByText("No headlines available.")).toBeTruthy();
+  });
+
+  it("leaves unscored headlines out of every bucket but still lists them", () => {
+    renderPanel([article({ title: "Unscored", score: null })]);
+
+    expect(filter("All").textContent).toBe("All 1");
+    expect(filter("Positive").textContent).toBe("Positive 0");
+    expect(screen.getByText("Unscored")).toBeTruthy();
+  });
+
+  it("renders a hostile URL as plain text instead of a link", () => {
+    renderPanel([
+      article({ title: "Trap", url: "javascript:alert(1)" }),
+      article({ title: "Safe", url: "https://example.com/safe" }),
+    ]);
+
+    expect(screen.getByText("Trap").tagName).toBe("SPAN");
+    const safe = screen.getByText("Safe");
+    expect(safe.tagName).toBe("A");
+    expect(safe.getAttribute("href")).toBe("https://example.com/safe");
+    expect(safe.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+});
