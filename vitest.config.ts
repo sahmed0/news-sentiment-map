@@ -16,6 +16,14 @@ export default defineConfig({
       reporter: ["text", "json-summary"],
       include: ["src/**", "api/**", "shared/**"],
       exclude: ["src/main.tsx"],
+      // A floor, not a target: each threshold is the measured value rounded
+      // down to the nearest 5.
+      thresholds: {
+        lines: 80,
+        statements: 80,
+        functions: 75,
+        branches: 65,
+      },
     },
   },
 });

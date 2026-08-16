@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Tailwind's automatic content detection scans the whole repo, so class-like
+   strings inside test files mint real utilities that ship to users. Tests never
+   render into the app, so exclude them. */
+@source not "../test/**/*";
+
 @custom-variant light (.theme-light &);
 
 /* Make the `sm`/`md` "large display" layouts require vertical room, not just
