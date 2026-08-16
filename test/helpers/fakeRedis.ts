@@ -4,6 +4,9 @@
 // for the scheduling, credit-ledger, history, tick-log, and handler tests:
 //   - set({ nx, ex }) returns "OK" or null so lock semantics work
 //   - zrange({ withScores }) returns a flat [member, score, ...] sorted by score
+//   - zremrangeby* treat both bounds as inclusive and resolve negative ranks
+//   - lpush prepends (so index 0 is the newest); lrange/ltrim treat both bounds as
+//     inclusive, resolve negative indices from the end, and clamp out-of-range ones
 //   - pipeline() queues ops and applies them on exec()
 // TTLs (ex / expire) are intentionally no-ops: tests inject `now`, they don't
 // wait for real expiry.
@@ -16,18 +19,29 @@ export interface FakeRedis extends RedisLike {
   _store: Map<string, unknown>;
   _sets: Map<string, Set<string>>;
   _zsets: Map<string, Map<string, number>>;
+  _lists: Map<string, string[]>;
 }
 
 interface Seed {
   store?: Record<string, unknown>;
   sets?: Record<string, string[]>;
   zsets?: Record<string, Record<string, number | string>>;
+  lists?: Record<string, string[]>; // index 0 is the head, as Redis returns it
 }
+
+// Resolve a Redis list index pair to inclusive array bounds: negative indices
+// count back from the end, out-of-range ones clamp. Callers treat from > to as
+// the empty range.
+const listRange = (len: number, start: number, stop: number): [number, number] => [
+  Math.max(0, start < 0 ? len + start : start),
+  Math.min(len - 1, stop < 0 ? len + stop : stop),
+];
 
 export function createFakeRedis(seed: Seed = {}): FakeRedis {
   const store = new Map<string, unknown>(); // key -> value (string | number | array | object)
   const sets = new Map<string, Set<string>>(); // key -> Set<string>
   const zsets = new Map<string, Map<string, number>>(); // key -> Map<member, score>
+  const lists = new Map<string, string[]>(); // key -> head-first array
 
   const api: FakeRedis = {
     async get(key) {
@@ -45,6 +59,7 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
         if (store.delete(k)) n++;
         sets.delete(k);
         zsets.delete(k);
+        lists.delete(k);
       }
       return n;
     },
@@ -107,6 +122,28 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
       }
       return removed;
     },
+    async lpush(key, ...values) {
+      const l = lists.get(key) ?? [];
+      // Redis pushes each value onto the head in turn, so a multi-value push ends
+      // up reversed relative to the argument order.
+      for (const v of values) l.unshift(v);
+      lists.set(key, l);
+      return l.length;
+    },
+    async lrange(key, start, stop) {
+      const l = lists.get(key) ?? [];
+      const [from, to] = listRange(l.length, start, stop);
+      return from > to ? [] : l.slice(from, to + 1);
+    },
+    async ltrim(key, start, stop) {
+      const l = lists.get(key);
+      if (!l) return "OK";
+      const [from, to] = listRange(l.length, start, stop);
+      // An empty result deletes the key in Redis, not leaves an empty list.
+      if (from > to) lists.delete(key);
+      else lists.set(key, l.slice(from, to + 1));
+      return "OK";
+    },
     async mget(...keys) {
       return keys.map((k) => (store.has(k) ? store.get(k) : null));
     },
@@ -125,6 +162,8 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
         zadd: push("zadd"),
         zremrangebyscore: push("zremrangebyscore"),
         zremrangebyrank: push("zremrangebyrank"),
+        lpush: push("lpush"),
+        ltrim: push("ltrim"),
         get: push("get"),
         exec: async () => {
           const results: unknown[] = [];
@@ -139,6 +178,7 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
     _store: store,
     _sets: sets,
     _zsets: zsets,
+    _lists: lists,
   };
 
   for (const [k, v] of Object.entries(seed.store ?? {})) store.set(k, v);
@@ -146,6 +186,7 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
   for (const [k, v] of Object.entries(seed.zsets ?? {})) {
     zsets.set(k, new Map(Object.entries(v).map(([m, s]) => [m, Number(s)])));
   }
+  for (const [k, v] of Object.entries(seed.lists ?? {})) lists.set(k, [...v]);
 
   return api;
 }

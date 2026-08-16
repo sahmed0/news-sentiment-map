@@ -16,10 +16,13 @@ import {
   lowPriorityDueOn,
   HISTORY_KEY,
   HISTORY_MAX_DAYS,
+  recordTick,
+  TICKS_KEY,
+  TICKS_MAX,
 } from "../../api/_lib/refresh-core.js";
 import { COUNTRIES, HIGH_PRIORITY_CODES } from "../../api/_lib/sentiment-fetch.js";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
-import type { CountryResult } from "../../shared/types.js";
+import type { CountryResult, TickSummary } from "../../shared/types.js";
 
 const dayIdOf = (now: Date) => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
 const gnDayIdOf = (now: Date) => Math.floor(now.getTime() / DAY_MS);
@@ -356,6 +359,46 @@ describe("persistCountries history", () => {
     for (const code of ["gb", "de", "fr", "jp"]) {
       expect(redis._zsets.has(HISTORY_KEY(code))).toBe(false); // gaps are honest data
     }
+  });
+});
+
+describe("recordTick", () => {
+  const summary = (ok: number): TickSummary => ({
+    ts: `2024-06-01T${String(ok % 24).padStart(2, "0")}:00:00.000Z`,
+    ok,
+    attempted: ok,
+    aggregate: 150,
+    tzDue: 1,
+    backfill: 2,
+    gnUsedDay: 3,
+    ndUsedDay: 4,
+    refunded: 0,
+    ms: 1234,
+  });
+
+  it("stores one parsable summary at the head of the list", async () => {
+    const redis = createFakeRedis();
+    await recordTick(redis, summary(7));
+    const rows = await redis.lrange(TICKS_KEY, 0, -1);
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(String(rows[0]))).toEqual(summary(7));
+  });
+
+  it("keeps the newest tick first", async () => {
+    const redis = createFakeRedis();
+    await recordTick(redis, summary(1));
+    await recordTick(redis, summary(2));
+    const rows = (await redis.lrange(TICKS_KEY, 0, -1)).map((r) => JSON.parse(String(r)).ok);
+    expect(rows).toEqual([2, 1]);
+  });
+
+  it("caps the list at TICKS_MAX, evicting the oldest", async () => {
+    const redis = createFakeRedis();
+    for (let i = 0; i <= TICKS_MAX; i++) await recordTick(redis, summary(i)); // one over the cap
+    const rows = (await redis.lrange(TICKS_KEY, 0, -1)).map((r) => JSON.parse(String(r)).ok);
+    expect(rows).toHaveLength(TICKS_MAX);
+    expect(rows[0]).toBe(TICKS_MAX); // newest kept
+    expect(rows[TICKS_MAX - 1]).toBe(1); // tick 0 evicted
   });
 });
 

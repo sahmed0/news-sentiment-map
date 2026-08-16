@@ -1,4 +1,4 @@
-// Geometry behind the country panel's 30-day trend chart.
+// Geometry & arithmetic behind the country panel's 30-day trend chart.
 // Kept out of the component so the shape of the line and the 7-day delta are
 // unit-testable without rendering anything.
 import type { HistoryPoint } from "../../shared/types";
@@ -28,6 +28,17 @@ export function buildPolyline(points: HistoryPoint[], w: number, h: number): str
   // NaN coordinates for a caller that doesn't.
   const step = points.length > 1 ? w / (points.length - 1) : 0;
   return points.map((p, i) => `${round2(i * step)},${round2(scoreY(p.score, h))}`).join(" ");
+}
+
+// Compact "Mon D" caption for a stored point's date. Parsed as UTC so the
+// label matches the stored day bucket regardless of the viewer's local
+// timezone (the date string itself carries no time-of-day to shift).
+export function formatShortDate(date: string): string {
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 // Latest score minus the most recent point at least 7 calendar days older.

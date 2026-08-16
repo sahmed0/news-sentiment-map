@@ -122,6 +122,8 @@ export interface RedisPipelineLike {
   zadd(key: string, entry: { score: number; member: string }, ...entries: { score: number; member: string }[]): RedisPipelineLike;
   zremrangebyscore(key: string, min: number, max: number): RedisPipelineLike;
   zremrangebyrank(key: string, start: number, stop: number): RedisPipelineLike;
+  lpush(key: string, ...values: string[]): RedisPipelineLike;
+  ltrim(key: string, start: number, stop: number): RedisPipelineLike;
   get(key: string): RedisPipelineLike;
   exec(): Promise<unknown[]>;
 }
@@ -137,6 +139,9 @@ export interface RedisLike {
   zrange(key: string, start: number, stop: number, opts?: { withScores?: boolean }): Promise<(string | number)[]>;
   zremrangebyscore(key: string, min: number, max: number): Promise<number>;
   zremrangebyrank(key: string, start: number, stop: number): Promise<number>;
+  lpush(key: string, ...values: string[]): Promise<number>;
+  ltrim(key: string, start: number, stop: number): Promise<string>;
+  lrange(key: string, start: number, stop: number): Promise<unknown[]>;
   mget(...keys: string[]): Promise<unknown[]>;
   pipeline(): RedisPipelineLike;
 }
@@ -164,19 +169,49 @@ export interface StoredHistoryPoint {
   n: number; // number of scored headlines behind `s`
 }
 
-// Narrow one raw ZSET member into a StoredHistoryPoint. A truncated write
-// or a hand-edited key must not crash a read, so a malformed point is
-// dropped so the rest of the series still serves.
+// Narrow one raw ZSET member into a StoredHistoryPoint. The value arrives either
+// as the JSON string persistCountries wrote or as an already-parsed object (the
+// Upstash client's automatic deserialization JSON-parses every string in a
+// command's response, including ZSET members). A truncated write or a hand-edited key must not crash a
+// read, so a malformed point is dropped so the rest of the series still serves.
 export function parseHistoryPoint(v: unknown): StoredHistoryPoint | null {
-  if (typeof v !== "string") return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(v);
-  } catch {
-    return null;
+  let parsed: unknown = v;
+  if (typeof v === "string") {
+    try {
+      parsed = JSON.parse(v);
+    } catch {
+      return null;
+    }
   }
   if (!isRecord(parsed)) return null;
   const { d, s, n } = parsed;
   if (!Number.isFinite(d) || !Number.isFinite(s) || !Number.isFinite(n)) return null;
   return { d: Number(d), s: Number(s), n: Number(n) };
+}
+
+// Narrow one entry of the tick list into a TickSummary. The value arrives either
+// as the JSON string recordTick wrote or as an already-parsed object (the Upstash
+// client deserializes responses it recognises), so both forms are accepted. A
+// truncated or older-shaped entry reads as "no tick" rather than crashing the
+// health check - the one read that must never fail is the one that says whether
+// everything else is failing.
+export function parseTickSummary(v: unknown): TickSummary | null {
+  let parsed: unknown = v;
+  if (typeof v === "string") {
+    try {
+      parsed = JSON.parse(v);
+    } catch {
+      return null;
+    }
+  }
+  if (!isRecord(parsed)) return null;
+  if (typeof parsed.ts !== "string") return null; // the timestamp drives every status decision
+  const counters = ["ok", "attempted", "aggregate", "tzDue", "backfill", "gnUsedDay", "ndUsedDay", "refunded", "ms"] as const;
+  const out = { ts: parsed.ts } as TickSummary;
+  for (const k of counters) {
+    if (!Number.isFinite(parsed[k])) return null;
+    out[k] = Number(parsed[k]);
+  }
+  if (typeof parsed.error === "string") out.error = parsed.error;
+  return out;
 }

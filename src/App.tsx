@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { WorldMap } from "./components/WorldMap";
 import { CountryPanel } from "./components/CountryPanel";
 import { Legend } from "./components/Legend";
@@ -12,7 +12,7 @@ import { InfoPanel } from "./components/InfoPanel";
 import type { CountryResult, FilterKey } from "../shared/types";
 
 export default function App() {
-  const { byCode, data, loading, error, lastUpdated, fromCache } =
+  const { byCode, data, loading, warming, error, lastUpdated, fromCache, refetch } =
     useSentimentData();
   const { theme, toggle: toggleTheme } = useTheme();
   const [selectedCountry, setSelectedCountry] = useState<CountryResult | null>(null);
@@ -31,6 +31,13 @@ export default function App() {
     }
     return counts;
   }, [data]);
+
+  // Stable identity: WorldMap forwards this to a memoized path layer, which a
+  // fresh arrow on every render would defeat.
+  const handleSelectCountry = useCallback((country: CountryResult) => {
+    setSelectedCountry(country);
+    setShowInfo(false);
+  }, []);
 
   const btnStyle = {
     background: "rgb(var(--fg-rgb) / 0.08)",
@@ -100,12 +107,33 @@ export default function App() {
         </div>
       )}
 
+      {/* -- Warm-up banner --
+          Rendered over the loading overlay (same z-index, later in the DOM) so
+          a cold start reads as "waking up" rather than "broken". */}
+      {warming && (
+        <div className="absolute top-28 left-3 right-3 sm:top-16 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-30 px-4 py-2 rounded-lg text-sm text-center"
+          style={{
+            background: "rgb(var(--fg-rgb) / 0.08)",
+            border: "1px solid rgb(var(--fg-rgb) / 0.15)",
+            color: "rgb(var(--fg-rgb))",
+          }}>
+          Waking the data service… retrying in ~{warming.delaySeconds}s (attempt {warming.attempt}/{warming.maxAttempts})
+        </div>
+      )}
+
       {/* -- Error banner --
           Pinned below the header so it never collides with the controls. */}
       {error && (
-        <div className="absolute top-28 left-3 right-3 sm:top-16 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-30 px-4 py-2 rounded-lg text-sm text-center"
+        <div className="absolute top-28 left-3 right-3 sm:top-16 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-30 px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-3"
           style={{ background: "#ff000022", border: "1px solid #ff000055", color: "#f87171" }}>
-          Error: {error}
+          <span className="text-center">Error: {error}</span>
+          <button
+            onClick={refetch}
+            className="shrink-0 px-2 py-1 rounded-md text-xs transition-all"
+            style={btnStyle}
+          >
+            Retry
+          </button>
         </div>
       )}
 
@@ -135,12 +163,9 @@ export default function App() {
       <div className="w-full h-full" onClick={() => { setSelectedCountry(null); setShowInfo(false); }}>
         <WorldMap
           byCode={byCode}
-          selectedCountry={selectedCountry}
+          selectedCode={selectedCountry?.code?.toUpperCase() ?? null}
           sentimentFilter={sentimentFilter}
-          onSelectCountry={(country) => {
-            setSelectedCountry(country);
-            setShowInfo(false);
-          }}
+          onSelectCountry={handleSelectCountry}
         />
       </div>
 

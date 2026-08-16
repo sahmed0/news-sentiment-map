@@ -12,6 +12,8 @@
 //   sentiment:history:<code>  -> ZSET, score = dayId, member = JSON {d,s,n}: one
 //                                point per country per scored day, capped at
 //                                HISTORY_MAX_DAYS (served by api/history.ts)
+//   sentiment:ticks           -> LIST of JSON TickSummary, newest first, capped at
+//                                TICKS_MAX: one entry per tick (served by api/health.ts)
 //
 // Headlines come from two providers with independent quotas, so the ledger is
 // split: high-priority countries are fetched from GNews, the rest from NewsData
@@ -20,11 +22,13 @@
 
 import { COUNTRIES, HIGH_PRIORITY_CODES, LOW_PRIORITY_COUNTRIES } from "./sentiment-fetch.js";
 import { parseCountryResult } from "../../shared/types.js";
-import type { CountryDef, CountryResult, ProviderCounts, RedisLike, Selection } from "../../shared/types.js";
+import type { CountryDef, CountryResult, ProviderCounts, RedisLike, Selection, TickSummary } from "../../shared/types.js";
 
 export const AGG_KEY = "sentiment:world";
 const COUNTRY_KEY = (code: string): string => `sentiment:country:${code}`;
-const FRESH_KEY = "sentiment:freshness";
+// Exported alongside the credit-ledger keys and the day-id helpers below because
+// api/health.ts reads all of them: the key formats stay defined here, once.
+export const FRESH_KEY = "sentiment:freshness";
 const DONE_KEY = (dayId: number): string => `sentiment:done:${dayId}`;
 export const ND_CREDIT_DAY_KEY = (dayId: number): string => `sentiment:credits:nd:day:${dayId}`;
 export const GN_CREDIT_DAY_KEY = (dayId: number): string => `sentiment:credits:gn:day:${dayId}`;
@@ -32,6 +36,10 @@ export const HISTORY_KEY = (code: string): string => `sentiment:history:${code}`
 // A year of daily points per country for trend analysis: small enough
 // (~40 bytes a point) that the ZSETs never grow unbounded.
 export const HISTORY_MAX_DAYS = 365;
+export const TICKS_KEY = "sentiment:ticks";
+// ~4 days of hourly ticks - enough to eyeball a pattern of failures without the
+// list growing forever. Only the newest is served today (see api/health.ts).
+export const TICKS_MAX = 100;
 
 // NewsData free tier: 200 credits / day. Stay a margin under it. NEWSDATA_MAX_PER_TICK
 // bounds the NewsData work in a single cron tick (each country is fetched + scored
@@ -65,11 +73,11 @@ export const NEWSDATA_DAY_OFFSET_MS = 60 * 60 * 1000;
 
 // NewsData-aligned day (shifted to its 1am reset) - drives the done-set, the
 // NewsData credit ledger, and the low-priority cadence.
-const dayId = (now: Date): number => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
+export const dayId = (now: Date): number => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
 // GNews resets on the plain UTC calendar day (midnight), so its ledger uses an
 // unshifted day. Keying it off dayId would mis-book ~one tick of usage in the
 // 00:00-01:00 UTC gap into the previous ledger day.
-const gnDayId = (now: Date): number => Math.floor(now.getTime() / DAY_MS);
+export const gnDayId = (now: Date): number => Math.floor(now.getTime() / DAY_MS);
 
 // Fixed cadence phase per low-priority country: its position in the list modulo
 // LOW_PRIORITY_DAYS. Round-robin assignment partitions the low-priority countries
@@ -399,4 +407,15 @@ export async function rebuildAggregate(redis: RedisLike): Promise<number> {
     }));
   await redis.set(AGG_KEY, data);
   return data.length;
+}
+
+// Leave a durable trace of one tick. Vercel function logs expire and can't be
+// queried from the app, so the health endpoint needs its own record of what the
+// pipeline last did - including the ticks that failed, which are exactly the ones
+// nobody is watching the logs for. Newest first (lpush), trimmed to TICKS_MAX.
+export async function recordTick(redis: RedisLike, summary: TickSummary): Promise<void> {
+  const p = redis.pipeline();
+  p.lpush(TICKS_KEY, JSON.stringify(summary));
+  p.ltrim(TICKS_KEY, 0, TICKS_MAX - 1);
+  await p.exec();
 }

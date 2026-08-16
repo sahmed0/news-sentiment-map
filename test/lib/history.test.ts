@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPolyline, computeDelta7d } from "../../src/lib/history.js";
+import { buildPolyline, computeDelta7d, formatShortDate } from "../../src/lib/history.js";
 import type { HistoryPoint } from "../../shared/types";
 
 const pt = (date: string, score: number): HistoryPoint => ({ date, score, n: 3 });
@@ -46,5 +46,18 @@ describe("computeDelta7d", () => {
   it("returns null for a single point and for an empty series", () => {
     expect(computeDelta7d([pt("2026-07-15", 0.3)])).toBeNull();
     expect(computeDelta7d([])).toBeNull();
+  });
+});
+
+describe("formatShortDate", () => {
+  it("renders a compact month/day label", () => {
+    expect(formatShortDate("2026-07-01")).toBe("Jul 1");
+    expect(formatShortDate("2026-12-31")).toBe("Dec 31");
+  });
+
+  it("parses as UTC so a local timezone can't shift the day", () => {
+    // A date-only string with a local (non-UTC) interpretation would land on
+    // Dec 31 west of the meridian; pinning to UTC keeps it on Jan 1 everywhere.
+    expect(formatShortDate("2026-01-01")).toBe("Jan 1");
   });
 });

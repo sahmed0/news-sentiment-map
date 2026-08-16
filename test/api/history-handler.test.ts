@@ -144,6 +144,20 @@ describe("GET /api/history", () => {
     expect(res.body).toEqual({ error: "Data temporarily unavailable" });
   });
 
+  it("serves points when the client auto-deserializes ZSET members into objects", async () => {
+    // The real @upstash/redis client's automatic deserialization JSON.parses every
+    // string in a command's response, so zrange hands back already-parsed objects,
+    // not the JSON strings persistCountries wrote. fakeRedis stores/returns raw
+    // strings, so this is stubbed directly to reproduce that real-world shape.
+    vi.mocked(Redis).mockImplementation(function () {
+      return { zrange: vi.fn().mockResolvedValue([{ d: DAY, s: 0.25, n: 4 }]) } as any;
+    });
+    const res = mockRes();
+    await call(res, { code: "us" });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.points).toEqual([{ date: "2024-10-04", score: 0.25, n: 4 }]);
+  });
+
   it("skips malformed members and still serves the valid ones", async () => {
     vi.mocked(Redis).mockImplementation(function () {
       return seedRedis({

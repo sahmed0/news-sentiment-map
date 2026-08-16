@@ -5,11 +5,11 @@ import { sentimentBucket, bucketColor, BUCKET_COLOR } from "../lib/sentiment";
 import { safeHttpUrl } from "../lib/url";
 import { SentimentFilter } from "./SentimentFilter";
 import { Sparkline } from "./Sparkline";
-import { computeDelta7d } from "../lib/history";
+import { computeDelta7d, formatShortDate } from "../lib/history";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useCountryHistory } from "../hooks/useCountryHistory";
 import { X } from 'lucide-react';
-import type { Article, CountryResult, FilterKey } from "../../shared/types";
+import type { Article, CountryResult, FilterKey, HistoryPoint } from "../../shared/types";
 
 // Below MIN_HISTORY_POINTS there are not enough data points
 // to justify showing a trend chart, so the chart stays hidden
@@ -198,6 +198,37 @@ function DeltaChip({ delta }: { delta: number }) {
   );
 }
 
+// Score caption matching ArticleScore's sign+2dp convention, colored by bucket
+// so the sparkline's shape always has a concrete number to read it against.
+function HistoryScore({ score }: { score: number }) {
+  const color = bucketColor(score) ?? BUCKET_COLOR.neutral;
+  return (
+    <span style={{ color }} className="font-semibold">
+      {score >= 0 ? "+" : ""}
+      {score.toFixed(2)}
+    </span>
+  );
+}
+
+// The chart's two endpoints, each paired with its date and score: the
+// earliest scored day (within the 30-day window Sparkline is given) on the
+// left, the most recent day on the right. Only rendered once
+// MIN_HISTORY_POINTS is met, so first and last are always distinct points.
+function HistoryCaption({ points }: { points: HistoryPoint[] }) {
+  const first = points[0];
+  const last = points[points.length - 1];
+  return (
+    <div className="flex items-center justify-between mt-1 text-[10px] tabular-nums text-fg/50 light:text-black/60">
+      <span title="Earliest scored day">
+        {formatShortDate(first.date)} <HistoryScore score={first.score} />
+      </span>
+      <span title="Current">
+        {formatShortDate(last.date)} <HistoryScore score={last.score} />
+      </span>
+    </div>
+  );
+}
+
 // Daily history for one country. It arrives after the panel is already on
 // screen, so nothing renders until it resolves.
 function HistorySection({ code }: { code: string }) {
@@ -216,7 +247,10 @@ function HistorySection({ code }: { code: string }) {
         {delta !== null && <DeltaChip delta={delta} />}
       </div>
       {enough ? (
-        <Sparkline points={points} />
+        <>
+          <Sparkline points={points} />
+          <HistoryCaption points={points} />
+        </>
       ) : (
         <p className="text-xs text-fg/40 light:text-black/50">
           History accumulates daily — check back soon.
