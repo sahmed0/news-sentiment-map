@@ -29,4 +29,10 @@ coverage
 
 .vercel
 
+# Eval downloads, API-response cache and dry-run output. eval/out/ IS committed.
+eval/data
+# Explicit: a global core.excludesFile with a bare "out/" rule would otherwise
+# silently swallow the committed eval results.
+!eval/out/
+
 .env*
