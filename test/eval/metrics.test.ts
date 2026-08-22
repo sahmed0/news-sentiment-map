@@ -14,6 +14,9 @@ import type { SentimentBucket } from "../../shared/types";
 
 const pair = (actual: SentimentBucket, predicted: SentimentBucket): Pair => ({ actual, predicted });
 
+//   negative: 4 actual - 3 predicted negative, 1 predicted neutral
+//   neutral:  4 actual - 2 predicted neutral, 1 negative, 1 positive
+//   positive: 4 actual - 2 predicted positive, 2 predicted neutral
 const FIXTURE: Pair[] = [
   pair("negative", "negative"),
   pair("negative", "negative"),
@@ -137,6 +140,7 @@ describe("driftStats", () => {
     expect(stats.n).toBe(4);
     expect(stats.meanAbsDelta).toBeCloseTo(0.45, 4);
     expect(stats.maxAbsDelta).toBeCloseTo(0.9, 4);
+    // signed deltas sorted: -0.6, -0.3, 0, 0.9 -> median (-0.3 + 0) / 2
     expect(stats.medianDelta).toBeCloseTo(-0.15, 4);
     expect(stats.flipRate).toBe(0.5);
     expect(stats.pearson).not.toBeNull();
