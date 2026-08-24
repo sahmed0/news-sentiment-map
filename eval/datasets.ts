@@ -23,7 +23,7 @@ export const NEWSMTSC_URL =
 // Fixed so the sample is reproducible across machines and re-runs; changing it
 // changes which sentences are measured, which invalidates comparisons with
 // previously committed results.
-export const SAMPLE_SEED = 20260722;
+export const SAMPLE_SEED = 20260824;
 export const DEFAULT_PER_CLASS = 100; // 3 classes -> ~300 items
 
 // One annotated (sentence, target) pair as stored in the source JSONL.
