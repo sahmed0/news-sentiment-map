@@ -1,0 +1,86 @@
+{
+  "generatedAt": "2026-08-24T08:19:02.958Z",
+  "model": "https://router.huggingface.co/hf-inference/models/cardiffnlp/twitter-roberta-base-sentiment-latest",
+  "dataset": {
+    "name": "NewsMTSC (rw, test split)",
+    "url": "https://raw.githubusercontent.com/fhamborg/NewsMTSC/6b838e00f54423c253806327a0ae24dbffa24c9e/NewsSentiment/experiments/default/datasets/newsmtsc-rw-hf/test.jsonl",
+    "filter": "sentence-level labels from targets that all share one polarity",
+    "seed": 20260824
+  },
+  "n": 300,
+  "unscored": 0,
+  "production": {
+    "n": 300,
+    "accuracy": 0.6333,
+    "macroF1": 0.627,
+    "perClass": {
+      "negative": {
+        "precision": 0.5705,
+        "recall": 0.85,
+        "f1": 0.6827,
+        "support": 100
+      },
+      "neutral": {
+        "precision": 0.5714,
+        "recall": 0.44,
+        "f1": 0.4972,
+        "support": 100
+      },
+      "positive": {
+        "precision": 0.8243,
+        "recall": 0.61,
+        "f1": 0.7011,
+        "support": 100
+      }
+    },
+    "confusion": {
+      "negative": {
+        "negative": 85,
+        "neutral": 13,
+        "positive": 2
+      },
+      "neutral": {
+        "negative": 45,
+        "neutral": 44,
+        "positive": 11
+      },
+      "positive": {
+        "negative": 19,
+        "neutral": 20,
+        "positive": 61
+      }
+    }
+  },
+  "thresholdSweep": [
+    {
+      "t": 0.05,
+      "accuracy": 0.62,
+      "macroF1": 0.5956
+    },
+    {
+      "t": 0.1,
+      "accuracy": 0.6333,
+      "macroF1": 0.627
+    },
+    {
+      "t": 0.15,
+      "accuracy": 0.64,
+      "macroF1": 0.6384
+    },
+    {
+      "t": 0.2,
+      "accuracy": 0.63,
+      "macroF1": 0.6277
+    },
+    {
+      "t": 0.25,
+      "accuracy": 0.61,
+      "macroF1": 0.6071
+    },
+    {
+      "t": 0.3,
+      "accuracy": 0.58,
+      "macroF1": 0.5747
+    }
+  ]
+}
