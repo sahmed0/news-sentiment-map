@@ -13,5 +13,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src", "api", "shared", "test", "vite.config.*", "vitest.config.*", "eslint.config.*"]
+  "include": ["src", "api", "shared", "test", "eval", "vite.config.*", "vitest.config.*", "eslint.config.*"]
 }

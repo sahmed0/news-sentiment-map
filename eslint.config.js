@@ -29,6 +29,13 @@ export default tseslint.config([
     },
   },
   {
+    // The eval harness is a Node CLI (tsx), not browser code.
+    files: ['eval/**/*.{js,ts}'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
     // Vitest tests run in Node (with jsdom for the hook test) and mock `global.fetch`.
     // Test doubles (mock req/res, fetch stubs) legitimately need `any`, so the
     // no-explicit-any rule is relaxed here only - app code (api/, src/) keeps it on.

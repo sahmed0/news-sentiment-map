@@ -255,7 +255,9 @@ export function isRetryableNetworkError(err: unknown): boolean {
 const AZURE_BATCH_SIZE = 100;           // Azure Translator max documents per request
 const HF_BATCH_SIZE = 50;               // headlines per HuggingFace request - keeps payloads small
 
-const HF_ENGLISH_MODEL =
+// Exported so the eval harness measures the same model the map is built from,
+// rather than a second copy of this URL that could silently drift.
+export const HF_ENGLISH_MODEL =
   "https://router.huggingface.co/hf-inference/models/cardiffnlp/twitter-roberta-base-sentiment-latest";
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -528,7 +530,9 @@ async function translateHeadlines(titles: string[]): Promise<string[] | null> {
   }
 }
 
-async function translateAll(titles: string[]): Promise<string[]> {
+// Exported for the eval harness, which must measure this exact path (batching,
+// the empty-string substitution on Azure failure) and not a reimplementation.
+export async function translateAll(titles: string[]): Promise<string[]> {
   const out: string[] = [];
   for (let i = 0; i < titles.length; i += AZURE_BATCH_SIZE) {
     const chunk = titles.slice(i, i + AZURE_BATCH_SIZE);
@@ -656,7 +660,8 @@ async function batchSentimentModel(modelUrl: string, inputs: string[]): Promise<
 // Scores every input individually, splitting into HF_BATCH_SIZE-sized requests
 // so a large headline set never exceeds a single payload. Returns one score
 // (or null) per input, aligned to the input array.
-async function scoreInChunks(modelUrl: string, inputs: string[]): Promise<(number | null)[]> {
+// Exported for the eval harness (same reason as translateAll above).
+export async function scoreInChunks(modelUrl: string, inputs: string[]): Promise<(number | null)[]> {
   const scores: (number | null)[] = [];
   for (let i = 0; i < inputs.length; i += HF_BATCH_SIZE) {
     const chunk = inputs.slice(i, i + HF_BATCH_SIZE);
