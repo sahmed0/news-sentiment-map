@@ -74,3 +74,11 @@ Japanese can be thought of as "the noisiest" and the European/Arabic languages a
 - **Sentences, not headlines.** NewsMTSC items are sentences drawn from article bodies. They are close to headline register but not identical to it.
 
 The single most promising next step is a news-domain sentiment model in place of the Twitter-tuned one: the accuracy errors are concentrated in the neutral class and a general negative lean rather than in sign inversions, which is exactly the kind of miscalibration a domain-matched model tends to fix, and it would also shrink the Japanese-heavy translation drift by making the English scorer less sensitive to the phrasing noise a round-trip introduces.
+
+## Reproduction
+
+```powershell
+pnpm eval -- --task all
+```
+
+See [eval/README.md](README.md) for the required environment variables, expected spend, and the caching behaviour. Raw outputs live in [eval/out/](out/).
