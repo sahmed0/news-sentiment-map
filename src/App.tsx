@@ -1,15 +1,21 @@
 // src/App.tsx
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { WorldMap } from "./components/WorldMap";
 import { CountryPanel } from "./components/CountryPanel";
 import { Legend } from "./components/Legend";
 import { SentimentFilter } from "./components/SentimentFilter";
+import { FirstVisitHint } from "./components/FirstVisitHint";
 import { sentimentBucket } from "./lib/sentiment";
 import { useSentimentData } from "./hooks/useSentimentData";
 import { useTheme } from "./hooks/useTheme";
 import { Sun, Moon, Info } from 'lucide-react';
 import { InfoPanel } from "./components/InfoPanel";
 import type { CountryResult, FilterKey } from "../shared/types";
+
+// Once dismissed (closed, a country picked, or left to time out), the
+// first-visit hint never shows again on this device.
+const HINT_SEEN_KEY = "nsm-hint-seen";
+const HINT_AUTO_DISMISS_MS = 7000;
 
 export default function App() {
   const { byCode, data, loading, warming, error, lastUpdated, fromCache, refetch } =
@@ -18,6 +24,36 @@ export default function App() {
   const [selectedCountry, setSelectedCountry] = useState<CountryResult | null>(null);
   const [sentimentFilter, setSentimentFilter] = useState<FilterKey>("all");
   const [showInfo, setShowInfo] = useState(false);
+  // Lazy-read once per mount: whether this device has already dismissed the
+  // first-visit hint. A ref (not state) would need the same "read once"
+  // guard; a lazy initializer is the idiomatic way to do a one-time read.
+  const [hintSeen, setHintSeen] = useState(() => {
+    try {
+      return localStorage.getItem(HINT_SEEN_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  // Shown once real data is on screen and nothing else is competing for the
+  // same banner slot, unless this device has already dismissed it.
+  const showHint = !loading && !warming && !error && data.length > 0 && !hintSeen;
+
+  const dismissHint = useCallback(() => {
+    setHintSeen(true);
+    try {
+      localStorage.setItem(HINT_SEEN_KEY, "1");
+    } catch {
+      // Private browsing / storage disabled - the hint just reappears next visit.
+    }
+  }, []);
+
+  // Auto-dismiss so the hint never overstays its welcome. The effect only
+  // schedules a timer; the actual setState happens in its callback.
+  useEffect(() => {
+    if (!showHint) return;
+    const timer = setTimeout(dismissHint, HINT_AUTO_DISMISS_MS);
+    return () => clearTimeout(timer);
+  }, [showHint, dismissHint]);
 
   // Country counts per sentiment bucket for the map filter ("all" = all scored).
   const sentimentCounts = useMemo<Record<FilterKey, number>>(() => {
@@ -37,7 +73,8 @@ export default function App() {
   const handleSelectCountry = useCallback((country: CountryResult) => {
     setSelectedCountry(country);
     setShowInfo(false);
-  }, []);
+    dismissHint();
+  }, [dismissHint]);
 
   const btnStyle = {
     background: "rgb(var(--fg-rgb) / 0.08)",
@@ -96,46 +133,53 @@ export default function App() {
         </button>
       </div>
 
-      {/* -- Loading overlay -- */}
-      {loading && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center px-6"
-          style={{ background: "rgb(var(--bg-rgb) / 0.85)", backdropFilter: "blur(8px)" }}>
-          <div className="text-center space-y-2">
-            <div className="w-8 h-8 rounded-full border-2 border-fg/20 border-t-fg/80 animate-spin mx-auto" />
-            <p className="text-2xl text-bold tracking-widest opacity-75">Fetching headlines &amp; scoring sentiment…</p>
-          </div>
-        </div>
-      )}
-
-      {/* -- Warm-up banner --
-          Rendered over the loading overlay (same z-index, later in the DOM) so
-          a cold start reads as "waking up" rather than "broken". */}
-      {warming && (
-        <div className="absolute top-28 left-3 right-3 sm:top-16 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-30 px-4 py-2 rounded-lg text-sm text-center"
-          style={{
-            background: "rgb(var(--fg-rgb) / 0.08)",
-            border: "1px solid rgb(var(--fg-rgb) / 0.15)",
-            color: "rgb(var(--fg-rgb))",
-          }}>
-          Waking the data service… retrying in ~{warming.delaySeconds}s (attempt {warming.attempt}/{warming.maxAttempts})
-        </div>
-      )}
-
-      {/* -- Error banner --
-          Pinned below the header so it never collides with the controls. */}
-      {error && (
-        <div className="absolute top-28 left-3 right-3 sm:top-16 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-30 px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-3"
-          style={{ background: "#ff000022", border: "1px solid #ff000055", color: "#f87171" }}>
-          <span className="text-center">Error: {error}</span>
-          <button
-            onClick={refetch}
-            className="shrink-0 px-2 py-1 rounded-md text-xs transition-all"
-            style={btnStyle}
+      {/* -- Status banners: loading / warming / error, stacked in one column so no
+          combination overlaps. Non-blocking (the map stays visible and
+          interactive underneath) - a cold start reads as the map "waking up"
+          and materialising rather than the app being broken. -- */}
+      <div className="absolute top-16 left-3 right-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-30 flex flex-col items-center gap-2 pointer-events-none">
+        {loading && (
+          <div
+            className="flex items-center gap-2 px-4 py-2 rounded-full text-xs sm:text-sm font-medium"
+            style={{
+              background: "rgb(var(--panel-rgb) / 0.85)",
+              backdropFilter: "blur(12px)",
+              border: "1px solid rgb(var(--fg-rgb) / 0.1)",
+              color: "rgb(var(--fg-rgb) / 0.85)",
+            }}
           >
-            Retry
-          </button>
-        </div>
-      )}
+            <span className="w-3.5 h-3.5 rounded-full border-2 border-fg/20 border-t-fg/70 animate-spin shrink-0" />
+            Fetching headlines &amp; scoring sentiment…
+          </div>
+        )}
+
+        {warming && (
+          <div className="pointer-events-auto px-4 py-2 rounded-lg text-sm text-center"
+            style={{
+              background: "rgb(var(--fg-rgb) / 0.08)",
+              border: "1px solid rgb(var(--fg-rgb) / 0.15)",
+              color: "rgb(var(--fg-rgb))",
+            }}>
+            Waking the data service… retrying in ~{warming.delaySeconds}s (attempt {warming.attempt}/{warming.maxAttempts})
+          </div>
+        )}
+
+        {error && (
+          <div className="pointer-events-auto px-4 py-2 rounded-lg text-sm flex items-center justify-center gap-3"
+            style={{ background: "#ff000022", border: "1px solid #ff000055", color: "#f87171" }}>
+            <span className="text-center">Error: {error}</span>
+            <button
+              onClick={refetch}
+              className="shrink-0 px-2 py-1 rounded-md text-xs transition-all"
+              style={btnStyle}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        <FirstVisitHint show={showHint} onDismiss={dismissHint} />
+      </div>
 
       {/* -- Map sentiment filter --
           Mobile: full-width bar docked at the bottom. ≥sm: compact panel top-left. */}
