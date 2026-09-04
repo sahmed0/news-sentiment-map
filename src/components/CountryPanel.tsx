@@ -322,21 +322,13 @@ export function CountryPanel({ country, onClose }: CountryPanelProps) {
           {/* Header */}
           <div className="flex items-center justify-between px-5 pt-3 sm:pt-5 pb-3 border-b border-fg/8 shrink-0">
             <div>
-              <div className="flex items-center gap-2 mb-0.5">
-                <p className="text-xs uppercase tracking-widest opacity-60 light:opacity-65">
-                  Country
-                </p>
-                <span
-                  className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                    country.highPriority
-                      ? "bg-blue-500/15 text-blue-400 light:bg-blue-500/20 light:text-blue-600"
-                      : "bg-fg/8 text-fg/40 light:text-black/40"
-                  }`}
-                >
-                  {country.highPriority ? "High Priority" : "Low Priority"}
-                </span>
-              </div>
-              <h2 className="text-lg font-bold tracking-tight">
+              <p className="text-xs uppercase tracking-widest opacity-60 light:opacity-65 mb-0.5">
+                Country
+              </p>
+              <h2
+                className="text-xl font-bold tracking-tight"
+                style={{ fontFamily: "'DM Serif Display', serif" }}
+              >
                 {country.name}
               </h2>
             </div>

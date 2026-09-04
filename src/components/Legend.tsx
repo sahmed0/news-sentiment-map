@@ -1,9 +1,47 @@
 // src/components/Legend.tsx
 import { useState } from "react";
+import { motion } from "framer-motion";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { legendGradientCss, BUCKET_COLOR } from "../lib/sentiment";
-import { deriveRankings } from "../lib/rankings";
+import { deriveRankings, type ScoredCountry } from "../lib/rankings";
+import { flagEmoji } from "../lib/geo";
 import type { CountryResult } from "../../shared/types";
+
+// One leaderboard row: flag, name, score, and a bar sized to |score| (max
+// magnitude 1) so the ranking has a visual read, not just three numbers.
+function RankRow({ country, color, sign, delay }: {
+  country: ScoredCountry;
+  color: string;
+  sign: "+" | "";
+  delay: number;
+}) {
+  const pct = Math.min(Math.abs(country.score) * 100, 100);
+  return (
+    <div className="flex items-center gap-1.5 mb-1.5 last:mb-0">
+      <span className="text-xs leading-none shrink-0" aria-hidden="true">
+        {flagEmoji(country.code)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex justify-between gap-1">
+          <span className="opacity-70 truncate">{country.name}</span>
+          <span style={{ color }} className="font-bold shrink-0 tabular-nums">
+            {sign}
+            {country.score.toFixed(2)}
+          </span>
+        </div>
+        <div className="h-1 rounded-full bg-fg/10 overflow-hidden mt-0.5">
+          <motion.div
+            className="h-full rounded-full"
+            style={{ background: color }}
+            initial={{ width: 0 }}
+            animate={{ width: `${pct}%` }}
+            transition={{ duration: 0.5, delay, ease: "easeOut" }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface LegendProps {
   data: CountryResult[];
@@ -65,24 +103,14 @@ export function Legend({ data, lastUpdated, fromCache }: LegendProps) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <p className="uppercase tracking-tight opacity-60 mb-1.5">Most positive</p>
-              {top3.map((c) => (
-                <div key={c.code} className="flex justify-between gap-1 mb-1">
-                  <span className="opacity-70 truncate">{c.name}</span>
-                  <span style={{ color: BUCKET_COLOR.positive }} className="font-bold shrink-0">
-                    +{c.score.toFixed(2)}
-                  </span>
-                </div>
+              {top3.map((c, i) => (
+                <RankRow key={c.code} country={c} color={BUCKET_COLOR.positive} sign="+" delay={i * 0.05} />
               ))}
             </div>
             <div>
               <p className="uppercase tracking-widest opacity-60 mb-1.5">Most negative</p>
-              {bottom3.map((c) => (
-                <div key={c.code} className="flex justify-between gap-1 mb-1">
-                  <span className="opacity-70 truncate">{c.name}</span>
-                  <span style={{ color: BUCKET_COLOR.negative }} className="font-bold shrink-0">
-                    {c.score.toFixed(2)}
-                  </span>
-                </div>
+              {bottom3.map((c, i) => (
+                <RankRow key={c.code} country={c} color={BUCKET_COLOR.negative} sign="" delay={i * 0.05} />
               ))}
             </div>
           </div>

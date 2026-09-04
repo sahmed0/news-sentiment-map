@@ -34,3 +34,13 @@ export function dominantCentroid(pathGen: GeoPath, feature: Feature): [number, n
   }
   return best ? pathGen.centroid(best) : pathGen.centroid(feature);
 }
+
+// Alpha-2 → flag emoji, built from the two Unicode regional indicator symbols
+// rather than a lookup table (there are only 26, so it's cheaper than an
+// asset). Falls back to "" for anything that isn't a two-letter code, which
+// callers should render as the plain country name with no leading flag.
+export function flagEmoji(alpha2: string | undefined | null): string {
+  if (!alpha2 || alpha2.length !== 2) return "";
+  const codePoints = [...alpha2.toUpperCase()].map((c) => 127397 + c.charCodeAt(0));
+  return String.fromCodePoint(...codePoints);
+}

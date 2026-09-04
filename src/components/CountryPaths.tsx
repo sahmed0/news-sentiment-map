@@ -68,7 +68,10 @@ export const CountryPaths = memo(function CountryPaths({
               filter: isSelected
                 ? "brightness(1.3) drop-shadow(0 0 5px rgb(var(--fg-rgb)/0.5))"
                 : undefined,
-              transition: "opacity 0.15s, filter 0.15s",
+              // `fill` gets a slower transition than opacity/filter so a fresh
+              // fetch reads as the map "lighting up" from its empty color to a
+              // scored one, rather than an abrupt color swap.
+              transition: "opacity 0.15s, filter 0.15s, fill 0.6s ease-out",
             }}
             onClick={(e) => {
               e.stopPropagation();
