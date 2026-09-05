@@ -5,6 +5,7 @@ import { CountryPanel } from "./components/CountryPanel";
 import { Legend } from "./components/Legend";
 import { SentimentFilter } from "./components/SentimentFilter";
 import { FirstVisitHint } from "./components/FirstVisitHint";
+import { BrandBlock } from "./components/BrandBlock";
 import { sentimentBucket } from "./lib/sentiment";
 import { useSentimentData } from "./hooks/useSentimentData";
 import { useTheme } from "./hooks/useTheme";
@@ -89,26 +90,11 @@ export default function App() {
       }`}
       style={{ background: "rgb(var(--bg-rgb))", color: "rgb(var(--fg-rgb))" }}
     >
-      {/* -- Title --
-          Mobile: left-aligned in a top bar, leaving room for the buttons.
-          ≥sm: centered hero title as before. */}
-      <div className="hidden sm:block absolute top-3 left-4 right-24 sm:top-auto md:bottom-2 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 mb-[env(safe-area-inset-bottom)] z-10 text-left sm:text-center pointer-events-none sm:py-1 sm:px-3 rounded-lg"
-      style={{
-          background: "rgb(var(--panel-rgb) / 0.85)",
-          backdropFilter: "blur(12px)",
-          border: "1px solid rgb(var(--fg-rgb) / 0.08)",
-          color: "rgb(var(--fg-rgb))",
-        }}
-        >
-        <h1
-          className="text-lg sm:text-2xl font-black tracking-tight truncate"
-          style={{ fontFamily: "'DM Serif Display', serif", letterSpacing: "-0.02em" }}
-        >
-          World News Sentiment
-        </h1>
-        <p className="hidden sm:block text-xs opacity-60 mt-0.5 tracking-wide uppercase">
-          Emotional temperature of global headlines
-        </p>
+      {/* -- Brand: title + tagline, top-left at every breakpoint so the
+          bottom edge stays clear for the scrubber. right-24 on mobile keeps
+          it clear of the top-right icon buttons. */}
+      <div className="absolute top-3 left-3 right-24 sm:right-auto z-10">
+        <BrandBlock />
       </div>
 
       {/* -- Top-right controls: theme toggle + info -- */}
