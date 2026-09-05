@@ -167,11 +167,11 @@ export default function App() {
         <FirstVisitHint show={showHint} onDismiss={dismissHint} />
       </div>
 
-      {/* -- Map sentiment filter --
-          Mobile: full-width bar docked at the bottom. ≥sm: compact panel top-left. */}
+      {/* -- Map sentiment filter (desktop only; mobile gets this via the
+          toolbar's Filter sheet) -- */}
       {!loading && data.length > 0 && (
         <div
-          className="absolute bottom-3 left-3 right-3 sm:left-1/3 sm:right-auto md:bottom-auto md:top-3 md:left-3 md:right-auto md:w-auto mb-[env(safe-area-inset-bottom)] z-10 rounded-xl p-2"
+          className="hidden md:block absolute top-24 left-3 z-10 rounded-xl p-2"
           style={{
             background: "rgb(var(--panel-rgb) / 0.85)",
             backdropFilter: "blur(12px)",
