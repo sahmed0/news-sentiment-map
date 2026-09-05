@@ -86,6 +86,101 @@ describe("App error banner", () => {
   });
 });
 
+describe("App brand block", () => {
+  it("renders the title on desktop", () => {
+    mockHook({ data: [COUNTRY] });
+    render(<App />);
+
+    expect(screen.getByText("World News Sentiment")).toBeTruthy();
+  });
+
+  it("renders the title on mobile too (regression: it used to be hidden below sm)", () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      mockHook({ data: [COUNTRY] });
+      render(<App />);
+
+      expect(screen.getByText("World News Sentiment")).toBeTruthy();
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
+  });
+});
+
+describe("App mobile toolbar", () => {
+  it("shows Filter and Legend items that open sheets, with no old bottom filter bar", () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      mockHook({ data: [COUNTRY] });
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+      expect(screen.getByRole("heading", { name: "Filter by sentiment" })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "Legend" }));
+      expect(screen.getByRole("heading", { name: "Legend & rankings" })).toBeTruthy();
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
+  });
+
+  // Regression: the toolbar and the info panel share the bottom edge on
+  // mobile at the same z-index. Left both up at once, the toolbar (which has
+  // no closed state of its own) would paint over the panel's last ~60px and
+  // stay tappable there, and a sheet opened earlier would linger underneath it.
+  it("hides itself and closes any open sheet once the info panel opens", () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      mockHook({ data: [COUNTRY] });
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+      expect(screen.getByRole("heading", { name: "Filter by sentiment" })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "About this project" }));
+
+      expect(screen.queryByRole("heading", { name: "Filter by sentiment" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Filter" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Legend" })).toBeNull();
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
+  });
+});
+
 describe("App map furniture", () => {
   it("shows the filter and the legend only once data has arrived", () => {
     mockHook({ loading: true });

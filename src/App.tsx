@@ -2,14 +2,16 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { WorldMap } from "./components/WorldMap";
 import { CountryPanel } from "./components/CountryPanel";
-import { Legend } from "./components/Legend";
+import { Legend, LegendContent } from "./components/Legend";
 import { SentimentFilter } from "./components/SentimentFilter";
 import { FirstVisitHint } from "./components/FirstVisitHint";
 import { BrandBlock } from "./components/BrandBlock";
+import { Sheet } from "./components/Sheet";
+import { MobileToolbar, type MobileToolbarItem } from "./components/MobileToolbar";
 import { sentimentBucket } from "./lib/sentiment";
 import { useSentimentData } from "./hooks/useSentimentData";
 import { useTheme } from "./hooks/useTheme";
-import { Sun, Moon, Info } from 'lucide-react';
+import { Sun, Moon, Info, Funnel, List } from 'lucide-react';
 import { InfoPanel } from "./components/InfoPanel";
 import type { CountryResult, FilterKey } from "../shared/types";
 
@@ -25,6 +27,8 @@ export default function App() {
   const [selectedCountry, setSelectedCountry] = useState<CountryResult | null>(null);
   const [sentimentFilter, setSentimentFilter] = useState<FilterKey>("all");
   const [showInfo, setShowInfo] = useState(false);
+  // Selecting a country closes whichever sheet is open.
+  const [openSheet, setOpenSheet] = useState<null | "filter" | "legend">(null);
   // Lazy-read once per mount: whether this device has already dismissed the
   // first-visit hint. A ref (not state) would need the same "read once"
   // guard; a lazy initializer is the idiomatic way to do a one-time read.
@@ -74,6 +78,7 @@ export default function App() {
   const handleSelectCountry = useCallback((country: CountryResult) => {
     setSelectedCountry(country);
     setShowInfo(false);
+    setOpenSheet(null);
     dismissHint();
   }, [dismissHint]);
 
@@ -82,6 +87,24 @@ export default function App() {
     border: "1px solid rgb(var(--fg-rgb) / 0.12)",
     color: "rgb(var(--fg-rgb) / 0.7)",
   };
+
+  const mobileToolbarItems: MobileToolbarItem[] = [
+    {
+      key: "filter",
+      label: "Filter",
+      icon: <Funnel size={20} />,
+      active: openSheet === "filter",
+      badge: sentimentFilter !== "all",
+      onPress: () => setOpenSheet((s) => (s === "filter" ? null : "filter")),
+    },
+    {
+      key: "legend",
+      label: "Legend",
+      icon: <List size={20} />,
+      active: openSheet === "legend",
+      onPress: () => setOpenSheet((s) => (s === "legend" ? null : "legend")),
+    },
+  ];
 
   return (
     <div
@@ -109,7 +132,7 @@ export default function App() {
           {theme === "dark" ? <Sun size={25} /> : <Moon size={25} />}
         </button>
         <button
-          onClick={() => setShowInfo((v) => !v)}
+          onClick={() => { setShowInfo((v) => !v); setOpenSheet(null); }}
           className="w-9 h-9 rounded-lg transition-all flex items-center justify-center"
           style={showInfo ? { ...btnStyle, background: "rgb(var(--fg-rgb) / 0.18)" } : btnStyle}
           aria-label="About this project"
@@ -212,13 +235,42 @@ export default function App() {
         <InfoPanel open={showInfo} onClose={() => setShowInfo(false)} />
       </div>
 
-      {/* -- Legend + leaderboard -- */}
+      {/* -- Legend + leaderboard (desktop) -- */}
       {!loading && data.length > 0 && (
         <Legend
           data={data}
           lastUpdated={lastUpdated}
           fromCache={fromCache}
         />
+      )}
+
+      {/* -- Mobile toolbar + sheets: hidden while CountryPanel/InfoPanel is
+          open. All three share the bottom edge at the same z-index, so left
+          unconditional they'd paint over (and stay tappable through) the
+          last ~60px of an open panel; gating them here also means an open
+          sheet is already gone by the time a panel starts sliding in. -- */}
+      {!loading && data.length > 0 && !selectedCountry && !showInfo && (
+        <>
+          <MobileToolbar items={mobileToolbarItems} />
+          <Sheet
+            open={openSheet === "filter"}
+            onClose={() => setOpenSheet(null)}
+            title="Filter by sentiment"
+          >
+            <SentimentFilter
+              value={sentimentFilter}
+              onChange={setSentimentFilter}
+              counts={sentimentCounts}
+            />
+          </Sheet>
+          <Sheet
+            open={openSheet === "legend"}
+            onClose={() => setOpenSheet(null)}
+            title="Legend & rankings"
+          >
+            <LegendContent data={data} lastUpdated={lastUpdated} fromCache={fromCache} />
+          </Sheet>
+        </>
       )}
     </div>
   );
