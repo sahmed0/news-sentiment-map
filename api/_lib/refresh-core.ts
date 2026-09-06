@@ -21,8 +21,8 @@
 // one API's usage can never throttle the other.
 
 import { COUNTRIES, HIGH_PRIORITY_CODES, LOW_PRIORITY_COUNTRIES } from "./sentiment-fetch.js";
-import { parseCountryResult } from "../../shared/types.js";
-import type { CountryDef, CountryResult, ProviderCounts, RedisLike, Selection, TickSummary } from "../../shared/types.js";
+import { parseCountryResult, parseHistoryPoint, parseWorldHistory } from "../../shared/types.js";
+import type { CountryDef, CountryResult, ProviderCounts, RedisLike, Selection, TickSummary, WorldHistory } from "../../shared/types.js";
 
 export const AGG_KEY = "sentiment:world";
 const COUNTRY_KEY = (code: string): string => `sentiment:country:${code}`;
@@ -36,6 +36,18 @@ export const HISTORY_KEY = (code: string): string => `sentiment:history:${code}`
 // A year of daily points per country for trend analysis: small enough
 // (~40 bytes a point) that the ZSETs never grow unbounded.
 export const HISTORY_MAX_DAYS = 365;
+// Derived key: every country's last WORLD_HISTORY_WINDOW_DAYS daily scores in one
+// columnar blob, so the timeline scrubber is a single GET rather than 155. The
+// cron is the only writer (see refreshWorldHistory); one writer, many readers,
+// matching sentiment:world.
+export const WORLD_HISTORY_KEY = "sentiment:history:world";
+// Matches WINDOW_DAYS in api/history.ts and the panel's "30-day trend", so one
+// window governs the whole app.
+export const WORLD_HISTORY_WINDOW_DAYS = 30;
+// UTC hour of the daily full rebuild. A tick in this hour rebuilds from the
+// durable per-country ZSETs instead of patching, healing any drift the cheap
+// incremental patch may have accumulated.
+export const WORLD_HISTORY_REBUILD_HOUR = 4;
 export const TICKS_KEY = "sentiment:ticks";
 // ~4 days of hourly ticks - enough to eyeball a pattern of failures without the
 // list growing forever. Only the newest is served today (see api/health.ts).
@@ -413,6 +425,99 @@ export async function rebuildAggregate(redis: RedisLike): Promise<number> {
     }));
   await redis.set(AGG_KEY, data);
   return data.length;
+}
+
+// The WORLD_HISTORY_WINDOW_DAYS calendar dates ending at `day`, ascending.
+const windowDates = (day: number): string[] => {
+  const days: string[] = [];
+  for (let i = WORLD_HISTORY_WINDOW_DAYS - 1; i >= 0; i--) days.push(bucketToDate(day - i));
+  return days;
+};
+
+const round3 = (s: number): number => Math.round(s * 1000) / 1000;
+
+// Incrementally advance the world-history blob by one tick. Pure - no Redis, never
+// mutates `prev`. The window slides to end at `day`; each country's prior values
+// are re-placed by DATE (not by index - a skipped tick can move the window by more
+// than one day), then this tick's fresh `points` are written at today's slot.
+// Scores are rounded the same way persistCountries rounds them, so a patched value
+// is byte-identical to a rebuilt one.
+export function patchWorldHistory(
+  prev: WorldHistory | null,
+  day: number,
+  points: readonly { code: string; score: number }[],
+): WorldHistory {
+  const days = windowDates(day);
+  const writeIdx = days.length - 1; // bucketToDate(day) is always the last slot
+  const scores: Record<string, (number | null)[]> = {};
+
+  if (prev) {
+    // date -> index within prev, to look up "the value prev held for this date".
+    const prevIndexByDate = new Map(prev.days.map((d, i) => [d, i]));
+    for (const [code, series] of Object.entries(prev.scores)) {
+      scores[code] = days.map((d) => {
+        const pi = prevIndexByDate.get(d);
+        return pi === undefined ? null : series[pi];
+      });
+    }
+  }
+
+  for (const { code, score } of points) {
+    const series = scores[code] ?? new Array<number | null>(days.length).fill(null);
+    series[writeIdx] = round3(score);
+    scores[code] = series;
+  }
+
+  return { days, scores };
+}
+
+// Full rebuild from the durable per-country history ZSETs. One pipelined
+// zrange per country (155 sequential round trips would blow the tick budget),
+// each member parsed and placed at its date's index inside the target window.
+export async function buildWorldHistory(redis: RedisLike, day: number): Promise<WorldHistory> {
+  const days = windowDates(day);
+  const indexByDate = new Map(days.map((d, i) => [d, i]));
+  const oldestBucket = day - (WORLD_HISTORY_WINDOW_DAYS - 1);
+
+  const p = redis.pipeline();
+  for (const c of COUNTRIES) p.zrange(HISTORY_KEY(c.code), -WORLD_HISTORY_WINDOW_DAYS, -1);
+  const rows = await p.exec();
+
+  const scores: Record<string, (number | null)[]> = {};
+  COUNTRIES.forEach((c, i) => {
+    const members = Array.isArray(rows[i]) ? (rows[i] as unknown[]) : [];
+    const series = new Array<number | null>(days.length).fill(null);
+    let scored = false;
+    for (const m of members) {
+      const pt = parseHistoryPoint(m);
+      if (!pt || pt.d < oldestBucket || pt.d > day) continue; // outside the window
+      const idx = indexByDate.get(bucketToDate(pt.d));
+      if (idx === undefined) continue;
+      series[idx] = round3(pt.s);
+      scored = true;
+    }
+    // A country with no in-window point contributes nothing - kept out of the
+    // blob so it stays ~30 KB rather than carrying ~120 empty series.
+    if (scored) scores[c.code] = series;
+  });
+
+  return { days, scores };
+}
+
+// Maintain WORLD_HISTORY_KEY for one tick. Rebuilds when the key is missing or
+// unparseable (self-heal) or once daily at WORLD_HISTORY_REBUILD_HOUR; otherwise
+// patches. No TTL - like the aggregate, it must degrade to last-good, not to blank.
+export async function refreshWorldHistory(
+  redis: RedisLike,
+  points: readonly { code: string; score: number }[],
+  day: number,
+  now: Date = new Date(),
+): Promise<"rebuilt" | "patched"> {
+  const stored = parseWorldHistory(await redis.get(WORLD_HISTORY_KEY));
+  const rebuild = stored === null || now.getUTCHours() === WORLD_HISTORY_REBUILD_HOUR;
+  const next = rebuild ? await buildWorldHistory(redis, day) : patchWorldHistory(stored, day, points);
+  await redis.set(WORLD_HISTORY_KEY, next);
+  return rebuild ? "rebuilt" : "patched";
 }
 
 // Leave a durable trace of one tick. Vercel function logs expire and can't be
