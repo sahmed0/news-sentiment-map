@@ -71,6 +71,12 @@ export const DAY_MS = 24 * 60 * 60 * 1000;
 // day boundary changes a minute before theirs (epoch / DAY_MS flips at midnight of the shifted clock).
 export const NEWSDATA_DAY_OFFSET_MS = 60 * 60 * 1000;
 
+// Day bucket -> calendar date. The bucket is the NewsData-shifted day (see
+// NEWSDATA_DAY_OFFSET_MS), so adding the offset back lands inside that day.
+// One definition, shared by api/history.ts and the world-history builders below.
+export const bucketToDate = (d: number): string =>
+  new Date(d * DAY_MS + NEWSDATA_DAY_OFFSET_MS).toISOString().slice(0, 10);
+
 // NewsData-aligned day (shifted to its 1am reset) - drives the done-set, the
 // NewsData credit ledger, and the low-priority cadence.
 export const dayId = (now: Date): number => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
