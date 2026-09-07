@@ -13,6 +13,7 @@ vi.mock("../../api/_lib/refresh-core.js", () => ({
   refundCounts: vi.fn(() => ({ newsdata: 0, gnews: 0 })),
   persistCountries: vi.fn(),
   rebuildAggregate: vi.fn(),
+  refreshWorldHistory: vi.fn(),
   recordTick: vi.fn(),
 }));
 
@@ -26,6 +27,7 @@ import {
   refundCounts,
   persistCountries,
   rebuildAggregate,
+  refreshWorldHistory,
   recordTick,
 } from "../../api/_lib/refresh-core.js";
 
@@ -245,6 +247,70 @@ describe("POST /api/cron/refresh - orchestration", () => {
     expect(res.statusCode).toBe(200); // bookkeeping must never fail a healthy tick
     expect(res.body).toMatchObject({ ok: true, aggregate: 7 });
     expect(redis._store.has(LOCK_KEY)).toBe(false);
+  });
+
+  it("patches world history from the countries that actually scored", async () => {
+    const redis = createFakeRedis();
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
+    vi.mocked(selectDueCountries).mockResolvedValue({
+      subset: [{ code: "us" }, { code: "gb" }],
+      counts: { gnews: 2, newsdata: 0 },
+      dayId: 42,
+      gnDayId: 43,
+      diag: { budget: 5, tzDue: 2, backfill: 0 },
+    } as any);
+    vi.mocked(fetchCountries).mockResolvedValue([
+      { code: "us", score: 0.4, articles: [{ title: "a", score: 0.4 }] },
+      { code: "gb", score: null, articles: [] }, // never scored → excluded from the patch
+    ] as any);
+    vi.mocked(refundCounts).mockReturnValue({ newsdata: 0, gnews: 0 });
+    vi.mocked(persistCountries).mockResolvedValue(["us"]);
+    vi.mocked(rebuildAggregate).mockResolvedValue(2);
+    vi.mocked(refreshWorldHistory).mockResolvedValue("patched");
+
+    const res = mockRes();
+    await call(authedReq(), res);
+
+    expect(refreshWorldHistory).toHaveBeenCalledWith(redis, [{ code: "us", score: 0.4 }], 42);
+    expect(res.body.debug.worldHistory).toBe("patched");
+  });
+
+  it("maintains world history on the idle path with an empty points array", async () => {
+    vi.mocked(Redis).mockImplementation(function () { return createFakeRedis() as any; });
+    vi.mocked(selectDueCountries).mockResolvedValue({ subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 9, gnDayId: 10, diag: { budget: 0 } } as any);
+    vi.mocked(rebuildAggregate).mockResolvedValue(7);
+    vi.mocked(refreshWorldHistory).mockResolvedValue("rebuilt");
+
+    const res = mockRes();
+    await call(authedReq(), res);
+
+    expect(refreshWorldHistory).toHaveBeenCalledWith(expect.anything(), [], 9);
+    expect(res.body.debug.worldHistory).toBe("rebuilt");
+  });
+
+  it("survives a world-history failure without failing the tick", async () => {
+    const redis = createFakeRedis();
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
+    vi.mocked(selectDueCountries).mockResolvedValue({
+      subset: [{ code: "us" }],
+      counts: { gnews: 1, newsdata: 0 },
+      dayId: 1,
+      gnDayId: 2,
+      diag: { budget: 5 },
+    } as any);
+    vi.mocked(fetchCountries).mockResolvedValue([{ code: "us", score: 0.4, articles: [{ title: "a", score: 0.4 }] }] as any);
+    vi.mocked(refundCounts).mockReturnValue({ newsdata: 0, gnews: 0 });
+    vi.mocked(persistCountries).mockResolvedValue(["us"]);
+    vi.mocked(rebuildAggregate).mockResolvedValue(1);
+    vi.mocked(refreshWorldHistory).mockRejectedValue(new Error("world history boom"));
+
+    const res = mockRes();
+    await call(authedReq(), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, refreshed: ["us"] });
+    expect(res.body.debug.worldHistory).toBe("failed");
+    expect(redis._store.has(LOCK_KEY)).toBe(false); // released in finally
   });
 
   it("returns 500 and still releases the lock when the tick throws", async () => {
