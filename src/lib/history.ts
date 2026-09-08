@@ -41,6 +41,18 @@ export function formatShortDate(date: string): string {
   });
 }
 
+// Full "14 August 2026" form of a stored day, for screen-reader announcements
+// and the historical-day note. Parsed as UTC for the same reason as
+// formatShortDate - the date string carries no time-of-day to shift on.
+export function formatLongDate(date: string): string {
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 // Latest score minus the most recent point at least 7 calendar days older.
 // Walks dates rather than counting array positions: only scored days write a
 // point, so seven entries back is not necessarily seven days back.
