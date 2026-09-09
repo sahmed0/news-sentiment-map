@@ -14,6 +14,7 @@ vi.mock("../../src/lib/geo.js", async (importOriginal) => {
 });
 
 import { numericToAlpha2 } from "../../src/lib/geo.js";
+import { scoreColor } from "../../src/lib/sentiment.js";
 import { CountryPaths } from "../../src/components/CountryPaths.js";
 
 // Two synthetic features - the real 110m topology would only slow the test down;
@@ -85,5 +86,46 @@ describe("CountryPaths memoization", () => {
     // Guards against the memo test above passing vacuously (e.g. if the spy
     // were wired to a module the component doesn't actually use).
     expect(renderPasses()).toBe(2);
+  });
+});
+
+describe("CountryPaths scrubbed-day override", () => {
+  const render1 = (scores?: Record<string, number | null>) =>
+    render(
+      <svg>
+        <g>
+          <CountryPaths
+            features={FEATURES}
+            paths={PATHS}
+            byCode={BY_CODE}
+            selectedCode={null}
+            sentimentFilter="all"
+            scores={scores}
+            onSelectCountry={noop}
+            onHover={noop}
+            onHoverEnd={noop}
+          />
+        </g>
+      </svg>,
+    );
+
+  const fillOf = (code: string) =>
+    (document.querySelector(`path[data-code="${code}"]`) as SVGPathElement).style.fill;
+
+  it("fills from `scores`, not byCode, when the prop is present", () => {
+    render1({ US: -0.9 });
+
+    // byCode has US at +0.40; the override wins.
+    expect(fillOf("US")).toBe(scoreColor(-0.9));
+    expect(fillOf("US")).not.toBe(scoreColor(0.4));
+    // Brazil is absent from the override -> treated as unscored that day.
+    expect(fillOf("BR")).toBe("var(--map-empty)");
+  });
+
+  it("falls back to byCode fills when no `scores` prop is given", () => {
+    render1(undefined);
+
+    expect(fillOf("US")).toBe(scoreColor(0.4));
+    expect(fillOf("BR")).toBe(scoreColor(-0.3));
   });
 });

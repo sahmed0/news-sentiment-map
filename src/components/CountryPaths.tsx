@@ -7,8 +7,9 @@
 // Every prop here must be referentially stable or the memo is worthless:
 // `features` is module-scope static data, `paths` changes identity only on
 // reprojection, `byCode` is memoized in useSentimentData, the handlers are
-// useCallback'd, and the selection arrives as a primitive code rather than the
-// country object.
+// useCallback'd, the selection arrives as a primitive code rather than the
+// country object, and `scores` (the scrubber's per-day override, when present)
+// is memoized in App.
 import { memo } from "react";
 import type { Feature } from "geojson";
 import { sentimentBucket, scoreColor } from "../lib/sentiment";
@@ -21,6 +22,10 @@ interface CountryPathsProps {
   byCode: Record<string, CountryResult>;
   selectedCode: string | null;          // UPPERCASE alpha-2, or null
   sentimentFilter: FilterKey;
+  // When set (the scrubber is on a past day), this overrides byCode's score for
+  // fill, dimming and the filter bucket - keyed by UPPERCASE alpha-2. byCode
+  // still supplies country names and click targets.
+  scores?: Record<string, number | null>;
   onSelectCountry: (country: CountryResult) => void;
   onHover: (e: React.MouseEvent, name: string, score: number | null | undefined) => void;
   onHoverEnd: () => void;
@@ -32,6 +37,7 @@ export const CountryPaths = memo(function CountryPaths({
   byCode,
   selectedCode,
   sentimentFilter,
+  scores,
   onSelectCountry,
   onHover,
   onHoverEnd,
@@ -43,7 +49,11 @@ export const CountryPaths = memo(function CountryPaths({
         const numId = String(f.id).padStart(3, "0");
         const alpha2 = numericToAlpha2(numId);
         const countryData = alpha2 ? byCode[alpha2] : null;
-        const score = countryData?.score;
+        // On a scrubbed day the score comes from `scores` (a country absent from
+        // it had no point that day); otherwise it's byCode's current score.
+        const score = scores
+          ? (alpha2 ? scores[alpha2] : null) ?? null
+          : countryData?.score;
         const numericScore = typeof score === "number" ? score : null;
         const hasData = numericScore !== null;
         const isSelected = alpha2 != null && alpha2 === selectedCode;
@@ -58,6 +68,7 @@ export const CountryPaths = memo(function CountryPaths({
         return (
           <path
             key={`${numId}-${i}`}
+            data-code={alpha2}
             d={d}
             strokeWidth={isSelected ? 1.1 : 0.4}
             style={{

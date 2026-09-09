@@ -1,13 +1,13 @@
 // src/components/WorldMap.tsx
 // Uses d3-geo + topojson-client directly
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, useCallback, useMemo, type Ref } from "react";
 import { geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import { zoom, zoomIdentity, type ZoomBehavior, type D3ZoomEvent } from "d3-zoom";
 import { select } from "d3-selection";
 import isoCountries from "i18n-iso-countries";
 import topo from "world-atlas/countries-110m.json";
-import { bucketColor } from "../lib/sentiment";
+import { bucketColor, scoreColor } from "../lib/sentiment";
 import { numericToAlpha2, dominantCentroid } from "../lib/geo";
 import { CountryPaths } from "./CountryPaths";
 import type { CountryResult, FilterKey } from "../../shared/types";
@@ -19,11 +19,25 @@ const world = topo as unknown as Topology<{ countries: GeometryCollection }>;
 
 const countries = feature(world, world.objects.countries).features as Feature[];
 
+// Imperative escape hatch for the scrubber. Writing 155 fills straight to the
+// DOM per frame skips React's diff - the same reason d3 owns the zoom transform
+// rather than re-rendering the component on every gesture frame.
+export interface WorldMapHandle {
+  paintScores(scores: Record<string, number | null>): void;
+  releaseScores(): void;
+}
+
 interface WorldMapProps {
   byCode: Record<string, CountryResult>;
   selectedCode: string | null; // UPPERCASE alpha-2 of the selected country, or null
   onSelectCountry: (country: CountryResult) => void;
   sentimentFilter?: FilterKey;
+  // Per-day score override for the paths (the scrubber on a past day); undefined
+  // on the live day. Keyed by UPPERCASE alpha-2.
+  scores?: Record<string, number | null>;
+  // A plain prop rather than forwardRef: App holds the ref and reads the handle
+  // off it to drive scrub frames.
+  handleRef?: Ref<WorldMapHandle>;
 }
 
 // Placed country label after collision filtering.
@@ -34,7 +48,7 @@ interface LabelCandidate {
   area: number;
 }
 
-export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilter = "all" }: WorldMapProps) {
+export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilter = "all", scores, handleRef }: WorldMapProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const gRef = useRef<SVGGElement | null>(null); // the <g> we apply zoom transforms to
   const zoomBehaviorRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null); // d3-zoom behavior, so resize can update its extent
@@ -175,6 +189,47 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
     };
   }, []);
 
+  // -- Imperative fill writes for the scrubber -----------------------------
+  // A code -> <path> lookup, rebuilt lazily whenever reprojection replaces the
+  // path nodes (identified by `paths` changing identity).
+  const nodeMapRef = useRef<Map<string, SVGPathElement> | null>(null);
+  useEffect(() => {
+    nodeMapRef.current = null;
+  }, [paths]);
+
+  const getNodeMap = useCallback(() => {
+    if (!nodeMapRef.current) {
+      const map = new Map<string, SVGPathElement>();
+      gRef.current
+        ?.querySelectorAll<SVGPathElement>("path[data-code]")
+        .forEach((node) => {
+          const code = node.getAttribute("data-code");
+          if (code) map.set(code, node);
+        });
+      nodeMapRef.current = map;
+    }
+    return nodeMapRef.current;
+  }, []);
+
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      paintScores(next: Record<string, number | null>) {
+        svgRef.current?.classList.add("map-scrubbing");
+        getNodeMap().forEach((node, code) => {
+          const s = next[code];
+          node.style.fill = typeof s === "number" ? scoreColor(s) : "var(--map-empty)";
+        });
+      },
+      releaseScores() {
+        // React repaints the fills authoritatively from `scores` after this;
+        // just drop the transition-suppression class.
+        svgRef.current?.classList.remove("map-scrubbing");
+      },
+    }),
+    [getNodeMap],
+  );
+
   // -- Hover tooltip handler -------------------------------------------------
   const handleMouseMove = useCallback((e: React.MouseEvent, name: string, score: number | null | undefined) => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -262,6 +317,7 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
             byCode={byCode}
             selectedCode={selectedCode}
             sentimentFilter={sentimentFilter}
+            scores={scores}
             onSelectCountry={onSelectCountry}
             onHover={handleMouseMove}
             onHoverEnd={handleMouseLeave}

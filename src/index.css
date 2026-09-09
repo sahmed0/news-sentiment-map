@@ -69,3 +69,10 @@ body {
   text-size-adjust: 100%;
   -webkit-text-size-adjust: 100%;
 }
+
+/* While the scrubber drives fills imperatively, the 0.6s fill transition would
+   smear every 300ms step into the next. !important is required because the
+   transition is set as an inline style on each path. */
+.map-scrubbing path {
+  transition: none !important;
+}
