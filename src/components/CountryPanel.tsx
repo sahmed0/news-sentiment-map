@@ -5,7 +5,7 @@ import { sentimentBucket, bucketColor, BUCKET_COLOR } from "../lib/sentiment";
 import { safeHttpUrl } from "../lib/url";
 import { SentimentFilter } from "./SentimentFilter";
 import { Sparkline } from "./Sparkline";
-import { computeDelta7d, formatShortDate } from "../lib/history";
+import { computeDelta7d, formatShortDate, formatLongDate } from "../lib/history";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useCountryHistory } from "../hooks/useCountryHistory";
 import { X } from 'lucide-react';
@@ -253,7 +253,7 @@ function HistorySection({ code }: { code: string }) {
         </>
       ) : (
         <p className="text-xs text-fg/40 light:text-black/50">
-          History accumulates daily — check back soon.
+          We don't have enough data to show a history trend for this country yet.
         </p>
       )}
     </div>
@@ -263,15 +263,15 @@ function HistorySection({ code }: { code: string }) {
 interface CountryPanelProps {
   country: CountryResult | null;
   onClose: () => void;
+  // Set when the scrubber is on a past day: the sentiment bar shows this day's
+  // score and no headlines, since headlines are only kept for the current
+  // day. Undefined = normal behavior.
+  historical?: { date: string; score: number | null };
 }
 
-export function CountryPanel({ country, onClose }: CountryPanelProps) {
+export function CountryPanel({ country, onClose, historical }: CountryPanelProps) {
   const isMobile = useIsMobile();
   const dragControls = useDragControls();
-
-  // Mobile: a bottom sheet that slides up and can be flicked down to dismiss.
-  // Drag is initiated only from the grab handle (see below) so the headlines
-  // list scrolls normally. ≥md: a side panel that slides in from the right.
   const motionProps: MotionProps = isMobile
     ? {
         initial: { y: "100%", opacity: 0 },
@@ -341,20 +341,29 @@ export function CountryPanel({ country, onClose }: CountryPanelProps) {
             </button>
           </div>
 
-          {/* Sentiment score - only shown for scored countries (the map only
-              opens the panel when a country has a numeric score). */}
-          {typeof country.score === "number" && (
+          {/* Sentiment score */}
+          {typeof (historical ? historical.score : country.score) === "number" && (
             <div className="px-5 pt-4">
-              <SentimentBar score={country.score} />
+              <SentimentBar score={(historical ? historical.score : country.score) as number} />
             </div>
           )}
 
           {/* Daily sentiment history - absent until the country has been
-              scored on enough days (see HistorySection). */}
+              scored on enough days. */}
           <HistorySection code={country.code} />
 
-          {/* Headlines + sentiment filter */}
-          <Headlines articles={country.articles ?? []} />
+          {/* Headlines are only stored for the current day, so a past day shows
+          this note instead. */}
+          {historical ? (
+            <div className="flex-1 overflow-y-auto px-5 pb-5">
+              <p className="text-sm text-fg/60 light:text-black/70 leading-snug">
+                We do not store headlines for past days, so only the score
+                recorded on {formatLongDate(historical.date)} is shown.
+              </p>
+            </div>
+          ) : (
+            <Headlines articles={country.articles ?? []} />
+          )}
         </motion.div>
       )}
     </AnimatePresence>

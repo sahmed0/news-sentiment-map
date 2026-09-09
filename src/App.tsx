@@ -1,6 +1,6 @@
 // src/App.tsx
-import { useState, useMemo, useCallback, useEffect } from "react";
-import { WorldMap } from "./components/WorldMap";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { WorldMap, type WorldMapHandle } from "./components/WorldMap";
 import { CountryPanel } from "./components/CountryPanel";
 import { Legend, LegendContent } from "./components/Legend";
 import { SentimentFilter } from "./components/SentimentFilter";
@@ -8,10 +8,13 @@ import { FirstVisitHint } from "./components/FirstVisitHint";
 import { BrandBlock } from "./components/BrandBlock";
 import { Sheet } from "./components/Sheet";
 import { MobileToolbar, type MobileToolbarItem } from "./components/MobileToolbar";
+import { TimeScrubber } from "./components/TimeScrubber";
 import { sentimentBucket } from "./lib/sentiment";
+import { scoresForDay, MIN_HISTORY_DAYS } from "./lib/worldHistory";
 import { useSentimentData } from "./hooks/useSentimentData";
+import { useWorldHistory } from "./hooks/useWorldHistory";
 import { useTheme } from "./hooks/useTheme";
-import { Sun, Moon, Info, Funnel, List } from 'lucide-react';
+import { Sun, Moon, Info, Funnel, List, Clock } from 'lucide-react';
 import { InfoPanel } from "./components/InfoPanel";
 import type { CountryResult, FilterKey } from "../shared/types";
 
@@ -23,12 +26,17 @@ const HINT_AUTO_DISMISS_MS = 7000;
 export default function App() {
   const { byCode, data, loading, warming, error, lastUpdated, fromCache, refetch } =
     useSentimentData();
+  const { history, resolved } = useWorldHistory();
   const { theme, toggle: toggleTheme } = useTheme();
   const [selectedCountry, setSelectedCountry] = useState<CountryResult | null>(null);
   const [sentimentFilter, setSentimentFilter] = useState<FilterKey>("all");
   const [showInfo, setShowInfo] = useState(false);
   // Selecting a country closes whichever sheet is open.
-  const [openSheet, setOpenSheet] = useState<null | "filter" | "legend">(null);
+  const [openSheet, setOpenSheet] = useState<null | "filter" | "legend" | "time">(null);
+  // The scrubber's day, or null for live/today. The map handle is driven
+  // imperatively during a drag (see handlePreview) to skip 155 React diffs/frame.
+  const [dayIndex, setDayIndex] = useState<number | null>(null);
+  const mapRef = useRef<WorldMapHandle | null>(null);
   // Lazy-read once per mount: whether this device has already dismissed the
   // first-visit hint. A ref (not state) would need the same "read once"
   // guard; a lazy initializer is the idiomatic way to do a one-time read.
@@ -60,10 +68,38 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [showHint, dismissHint]);
 
+  // The timeline only shows once there's a week of history to
+  // scrub; below that no scrubber renders.
+  const hasScrubber = !loading && data.length > 0 && history.days.length >= MIN_HISTORY_DAYS;
+  const isLive = dayIndex === null;
+  const activeDayIndex = dayIndex ?? Math.max(0, history.days.length - 1);
+
+  // The scrubbed day's scores, keyed UPPERCASE. Used to override the map fills,
+  // the filter counts and the legend leaderboard so they all agree with what
+  // the map is showing.
+  const dayScores = useMemo(
+    () => scoresForDay(resolved, activeDayIndex),
+    [resolved, activeDayIndex],
+  );
+
+  // Passed to the map: undefined on the live day (CountryPaths falls back to
+  // byCode), the day's override otherwise.
+  const activeScores = isLive ? undefined : dayScores;
+
+  // `data` with each score swapped for the scrubbed day's, so counts and
+  // rankings follow the timeline. Identical to `data` on the live day.
+  const activeData = useMemo(
+    () =>
+      isLive
+        ? data
+        : data.map((c) => ({ ...c, score: dayScores[c.code.toUpperCase()] ?? null })),
+    [isLive, data, dayScores],
+  );
+
   // Country counts per sentiment bucket for the map filter ("all" = all scored).
   const sentimentCounts = useMemo<Record<FilterKey, number>>(() => {
     const counts: Record<FilterKey, number> = { all: 0, positive: 0, neutral: 0, negative: 0 };
-    for (const country of data) {
+    for (const country of activeData) {
       const bucket = sentimentBucket(country.score);
       if (bucket) {
         counts[bucket] += 1;
@@ -71,7 +107,25 @@ export default function App() {
       }
     }
     return counts;
-  }, [data]);
+  }, [activeData]);
+
+  // Drag frames: paint straight to the DOM, no React state.
+  const handleScrubPreview = useCallback(
+    (i: number) => {
+      mapRef.current?.paintScores(scoresForDay(resolved, i));
+    },
+    [resolved],
+  );
+
+  // Release / keyboard commit / autoplay step: hand the day back to React, which
+  // repaints the map from `activeScores`.
+  const handleScrubCommit = useCallback(
+    (i: number) => {
+      mapRef.current?.releaseScores();
+      setDayIndex(i >= history.days.length - 1 ? null : i);
+    },
+    [history.days.length],
+  );
 
   // Stable identity: WorldMap forwards this to a memoized path layer, which a
   // fresh arrow on every render would defeat.
@@ -97,6 +151,15 @@ export default function App() {
       badge: sentimentFilter !== "all",
       onPress: () => setOpenSheet((s) => (s === "filter" ? null : "filter")),
     },
+    ...(hasScrubber
+      ? [{
+          key: "time",
+          label: "Time",
+          icon: <Clock size={20} />,
+          active: openSheet === "time",
+          onPress: () => setOpenSheet((s) => (s === "time" ? null : "time")),
+        } satisfies MobileToolbarItem]
+      : []),
     {
       key: "legend",
       label: "Legend",
@@ -218,6 +281,8 @@ export default function App() {
           byCode={byCode}
           selectedCode={selectedCountry?.code?.toUpperCase() ?? null}
           sentimentFilter={sentimentFilter}
+          scores={activeScores}
+          handleRef={mapRef}
           onSelectCountry={handleSelectCountry}
         />
       </div>
@@ -227,6 +292,14 @@ export default function App() {
         <CountryPanel
           country={selectedCountry}
           onClose={() => setSelectedCountry(null)}
+          historical={
+            !isLive && selectedCountry
+              ? {
+                  date: history.days[activeDayIndex],
+                  score: dayScores[selectedCountry.code.toUpperCase()] ?? null,
+                }
+              : undefined
+          }
         />
       </div>
 
@@ -238,10 +311,25 @@ export default function App() {
       {/* -- Legend + leaderboard (desktop) -- */}
       {!loading && data.length > 0 && (
         <Legend
-          data={data}
+          data={activeData}
           lastUpdated={lastUpdated}
           fromCache={fromCache}
         />
+      )}
+
+      {/* -- Time scrubber (desktop, always visible).
+          Mobile has it in the toolbar's Time sheet.
+          Visibility lives on the wrapper so `hidden` never fights the control's
+          own `flex`. -- */}
+      {hasScrubber && (
+        <div className="hidden sm:block absolute bottom-3 inset-x-3 md:inset-x-auto md:left-1/2 md:-translate-x-1/2 md:w-[min(46rem,60vw)] z-10">
+          <TimeScrubber
+            days={history.days}
+            value={activeDayIndex}
+            onPreview={handleScrubPreview}
+            onCommit={handleScrubCommit}
+          />
+        </div>
       )}
 
       {/* -- Mobile toolbar + sheets: hidden while CountryPanel/InfoPanel is
@@ -268,8 +356,22 @@ export default function App() {
             onClose={() => setOpenSheet(null)}
             title="Legend & rankings"
           >
-            <LegendContent data={data} lastUpdated={lastUpdated} fromCache={fromCache} />
+            <LegendContent data={activeData} lastUpdated={lastUpdated} fromCache={fromCache} />
           </Sheet>
+          {hasScrubber && (
+            <Sheet
+              open={openSheet === "time"}
+              onClose={() => setOpenSheet(null)}
+              title="Timeline"
+            >
+              <TimeScrubber
+                days={history.days}
+                value={activeDayIndex}
+                onPreview={handleScrubPreview}
+                onCommit={handleScrubCommit}
+              />
+            </Sheet>
+          )}
         </>
       )}
     </div>
