@@ -95,6 +95,35 @@ describe("CountryPanel history section", () => {
   });
 });
 
+describe("CountryPanel historical mode", () => {
+  it("replaces the headlines with a dated note and shows the day's score", () => {
+    mockHistory([]);
+    render(
+      <CountryPanel
+        country={{ ...COUNTRY, articles: [article({ title: "Today only" })] }}
+        onClose={() => {}}
+        historical={{ date: "2026-08-14", score: -0.42 }}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Headlines are only kept for the current day/).textContent,
+    ).toContain("showing the score recorded on 14 August 2026.");
+    expect(screen.queryByText("Headlines")).toBeNull();
+    expect(screen.queryByText("Today only")).toBeNull();
+    // The sentiment bar reflects the historical score, not the country's current one.
+    expect(screen.getByText(/Negative \(-0\.42\)/)).toBeTruthy();
+  });
+
+  it("behaves exactly as before when `historical` is undefined", () => {
+    mockHistory([]);
+    render(<CountryPanel country={COUNTRY} onClose={() => {}} />);
+
+    expect(screen.getByText("Headlines")).toBeTruthy();
+    expect(screen.queryByText(/Headlines are only kept for the current day/)).toBeNull();
+  });
+});
+
 const article = (over: Partial<Article> = {}): Article => ({
   title: "A headline",
   url: "https://example.com/a",

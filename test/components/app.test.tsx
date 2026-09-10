@@ -8,6 +8,17 @@ vi.mock("../../src/hooks/useSentimentData.js", () => ({
   useSentimentData: vi.fn(),
 }));
 
+// The scrubber's data source. Default: empty history (no scrubber) - individual
+// tests override it to exercise the timeline.
+vi.mock("../../src/hooks/useWorldHistory.js", () => ({
+  useWorldHistory: vi.fn(() => ({
+    history: { days: [], scores: {} },
+    resolved: {},
+    loading: false,
+    error: true,
+  })),
+}));
+
 // The map is not what these assertions are about, and mounting it would parse
 // the bundled 110m topology and project ~180 features per test.
 vi.mock("../../src/components/WorldMap.js", () => ({
@@ -15,6 +26,9 @@ vi.mock("../../src/components/WorldMap.js", () => ({
 }));
 
 import { useSentimentData } from "../../src/hooks/useSentimentData.js";
+import { useWorldHistory } from "../../src/hooks/useWorldHistory.js";
+import { resolveWorldHistory } from "../../src/lib/worldHistory.js";
+import type { WorldHistory } from "../../shared/types";
 import App from "../../src/App.js";
 
 const COUNTRY: CountryResult = {
@@ -41,8 +55,28 @@ const mockHook = (over: Partial<UseSentimentData> = {}) =>
     ...over,
   });
 
+const EMPTY_WORLD_HISTORY = { history: { days: [], scores: {} }, resolved: {}, loading: false, error: true };
+
+const mockWorldHistory = (days: string[]) => {
+  const history: WorldHistory = {
+    days,
+    scores: { us: days.map((_, i) => Math.min(0.9, -0.3 + i * 0.02)) },
+  };
+  vi.mocked(useWorldHistory).mockReturnValue({
+    history,
+    resolved: resolveWorldHistory(history),
+    loading: false,
+    error: false,
+  });
+};
+
+const days = (n: number) =>
+  Array.from({ length: n }, (_, i) => `2026-08-${String(i + 1).padStart(2, "0")}`);
+
 beforeEach(() => {
   vi.mocked(useSentimentData).mockReset();
+  vi.mocked(useWorldHistory).mockReset();
+  vi.mocked(useWorldHistory).mockReturnValue(EMPTY_WORLD_HISTORY);
   refetch.mockReset();
 });
 afterEach(cleanup);
@@ -175,6 +209,53 @@ describe("App mobile toolbar", () => {
       expect(screen.queryByRole("heading", { name: "Filter by sentiment" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Filter" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Legend" })).toBeNull();
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
+  });
+});
+
+describe("App time scrubber", () => {
+  it("shows no scrubber with fewer than a week of history", () => {
+    mockHook({ data: [COUNTRY] });
+    mockWorldHistory(days(6));
+    render(<App />);
+
+    expect(screen.queryByRole("slider")).toBeNull();
+  });
+
+  it("renders the desktop scrubber once there is enough history", () => {
+    mockHook({ data: [COUNTRY] });
+    mockWorldHistory(days(20));
+    render(<App />);
+
+    expect(screen.getByRole("slider")).toBeTruthy();
+    // Starts live: the LIVE button is disabled on the latest day.
+    expect((screen.getByRole("button", { name: "Live" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("adds a Time item to the mobile toolbar that opens the timeline sheet", () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      mockHook({ data: [COUNTRY] });
+      mockWorldHistory(days(20));
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Time" }));
+      expect(screen.getByRole("heading", { name: "Timeline" })).toBeTruthy();
+      // The desktop dock plus the sheet's own copy.
+      expect(screen.getAllByRole("slider").length).toBeGreaterThanOrEqual(1);
     } finally {
       window.matchMedia = realMatchMedia;
     }
