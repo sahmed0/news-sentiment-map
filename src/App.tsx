@@ -6,10 +6,12 @@ import { Legend, LegendContent } from "./components/Legend";
 import { SentimentFilter } from "./components/SentimentFilter";
 import { FirstVisitHint } from "./components/FirstVisitHint";
 import { BrandBlock } from "./components/BrandBlock";
+import { WorldSummary } from "./components/WorldSummary";
 import { Sheet } from "./components/Sheet";
 import { MobileToolbar, type MobileToolbarItem } from "./components/MobileToolbar";
 import { TimeScrubber } from "./components/TimeScrubber";
 import { sentimentBucket } from "./lib/sentiment";
+import { computeWorldSummary } from "./lib/summary";
 import { scoresForDay, MIN_HISTORY_DAYS } from "./lib/worldHistory";
 import { useSentimentData } from "./hooks/useSentimentData";
 import { useWorldHistory } from "./hooks/useWorldHistory";
@@ -96,6 +98,12 @@ export default function App() {
     [isLive, data, dayScores],
   );
 
+  // The world summary stat. Follows the scrubber onto past days.
+  const worldSummary = useMemo(
+    () => computeWorldSummary(resolved, history.days, activeDayIndex, isLive),
+    [resolved, history.days, activeDayIndex, isLive],
+  );
+
   // Country counts per sentiment bucket for the map filter ("all" = all scored).
   const sentimentCounts = useMemo<Record<FilterKey, number>>(() => {
     const counts: Record<FilterKey, number> = { all: 0, positive: 0, neutral: 0, negative: 0 };
@@ -180,7 +188,9 @@ export default function App() {
           bottom edge stays clear for the scrubber. right-24 on mobile keeps
           it clear of the top-right icon buttons. */}
       <div className="absolute top-3 left-3 right-24 sm:right-auto z-10">
-        <BrandBlock />
+        <BrandBlock>
+          <WorldSummary summary={worldSummary} />
+        </BrandBlock>
       </div>
 
       {/* -- Top-right controls: theme toggle + info -- */}
