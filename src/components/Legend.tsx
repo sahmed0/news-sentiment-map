@@ -112,11 +112,13 @@ interface LegendProps {
 
 // Desktop-only: the mobile equivalent is the Legend sheet opened from
 // MobileToolbar, which renders LegendContent directly.
+// Positioning is the caller's job (App.tsx lays this out in a flex row next
+// to TimeScrubber) - this only ever sizes itself to its content.
 export function Legend({ data, lastUpdated, fromCache }: LegendProps) {
   const [open, setOpen] = useState(true);
 
   return (
-    <div className="hidden sm:block absolute bottom-2 left-2 mb-[env(safe-area-inset-bottom)] z-10">
+    <div className="hidden sm:block shrink-0">
       <button
         onClick={() => setOpen((o) => !o)}
         className="mb-2 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold"

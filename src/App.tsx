@@ -184,13 +184,35 @@ export default function App() {
       }`}
       style={{ background: "rgb(var(--bg-rgb))", color: "rgb(var(--fg-rgb))" }}
     >
-      {/* -- Brand: title + tagline, top-left at every breakpoint so the
-          bottom edge stays clear for the scrubber. right-24 on mobile keeps
-          it clear of the top-right icon buttons. */}
-      <div className="absolute top-3 left-3 right-24 sm:right-auto z-10">
+      {/* -- Brand + sentiment filter, stacked in one flex column so the
+          filter's position always follows BrandBlock's actual rendered
+          height instead of a hardcoded offset that WorldSummary's copy can
+          outgrow. right-24 on mobile keeps it clear of the top-right icon
+          buttons; the filter itself only shows md+ regardless. */}
+      <div className="absolute top-3 left-3 right-24 sm:right-auto z-10 flex flex-col items-start gap-2">
         <BrandBlock>
           <WorldSummary summary={worldSummary} />
         </BrandBlock>
+
+        {!loading && data.length > 0 && (
+          <div
+            className="hidden sm:block rounded-xl p-2"
+            style={{
+              background: "rgb(var(--panel-rgb) / 0.85)",
+              backdropFilter: "blur(12px)",
+              border: "1px solid rgb(var(--fg-rgb) / 0.08)",
+            }}
+          >
+            <p className="text-[10px] uppercase tracking-widest opacity-40 light:opacity-65 mb-1.5 px-1">
+              Filter by sentiment
+            </p>
+            <SentimentFilter
+              value={sentimentFilter}
+              onChange={setSentimentFilter}
+              counts={sentimentCounts}
+            />
+          </div>
+        )}
       </div>
 
       {/* -- Top-right controls: theme toggle + info -- */}
@@ -263,28 +285,6 @@ export default function App() {
         <FirstVisitHint show={showHint} onDismiss={dismissHint} />
       </div>
 
-      {/* -- Map sentiment filter (desktop only; mobile gets this via the
-          toolbar's Filter sheet) -- */}
-      {!loading && data.length > 0 && (
-        <div
-          className="hidden md:block absolute top-24 left-3 z-10 rounded-xl p-2"
-          style={{
-            background: "rgb(var(--panel-rgb) / 0.85)",
-            backdropFilter: "blur(12px)",
-            border: "1px solid rgb(var(--fg-rgb) / 0.08)",
-          }}
-        >
-          <p className="text-[10px] uppercase tracking-widest opacity-40 light:opacity-65 mb-1.5 px-1">
-            Filter by sentiment
-          </p>
-          <SentimentFilter
-            value={sentimentFilter}
-            onChange={setSentimentFilter}
-            counts={sentimentCounts}
-          />
-        </div>
-      )}
-
       {/* -- Map -- */}
       <div className="w-full h-full" onClick={() => { setSelectedCountry(null); setShowInfo(false); }}>
         <WorldMap
@@ -318,29 +318,32 @@ export default function App() {
         <InfoPanel open={showInfo} onClose={() => setShowInfo(false)} />
       </div>
 
-      {/* -- Legend + leaderboard (desktop) -- */}
-      {!loading && data.length > 0 && (
-        <Legend
-          data={activeData}
-          lastUpdated={lastUpdated}
-          fromCache={fromCache}
-        />
-      )}
-
-      {/* -- Time scrubber (desktop, always visible).
-          Mobile has it in the toolbar's Time sheet.
-          Visibility lives on the wrapper so `hidden` never fights the control's
-          own `flex`. -- */}
-      {hasScrubber && (
-        <div className="hidden sm:block absolute bottom-3 inset-x-3 md:inset-x-auto md:left-1/2 md:-translate-x-1/2 md:w-[min(46rem,60vw)] z-10">
-          <TimeScrubber
-            days={history.days}
-            value={activeDayIndex}
-            onPreview={handleScrubPreview}
-            onCommit={handleScrubCommit}
+      {/* -- Bottom bar: legend (left) + time scrubber, laid out together in
+          one flex row so the scrubber's width is always whatever space
+          Legend actually leaves rather than an independent centered guess
+          that can land on top of it. Both are desktop-only; mobile gets
+          them via the toolbar's sheets. -- */}
+      <div className="absolute bottom-3 inset-x-3 z-10 flex items-end gap-3 mb-[env(safe-area-inset-bottom)]">
+        {!loading && data.length > 0 && (
+          <Legend
+            data={activeData}
+            lastUpdated={lastUpdated}
+            fromCache={fromCache}
           />
-        </div>
-      )}
+        )}
+
+        {hasScrubber && (
+          <div className="hidden sm:flex flex-1 min-w-0 justify-center">
+            <TimeScrubber
+              days={history.days}
+              value={activeDayIndex}
+              onPreview={handleScrubPreview}
+              onCommit={handleScrubCommit}
+              className="w-full md:w-[min(46rem,100%)]"
+            />
+          </div>
+        )}
+      </div>
 
       {/* -- Mobile toolbar + sheets: hidden while CountryPanel/InfoPanel is
           open. All three share the bottom edge at the same z-index, so left
