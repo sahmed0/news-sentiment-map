@@ -45,7 +45,7 @@ describe("CountryPanel history section", () => {
     expect(screen.getByText("30-day trend")).toBeTruthy();
     expect(container.querySelector("svg polyline")).toBeTruthy();
     expect(screen.getByText(/7d/).textContent?.replace(/\s+/g, " ")).toBe("7d ▲ +0.30");
-    expect(screen.queryByText(/History accumulates daily/)).toBeNull();
+    expect(screen.queryByText(/We don't have enough data/)).toBeNull();
     // Caption: earliest scored day (Jul 1, +0.10) on the left, current (Jul 8, +0.40) on the right.
     expect(screen.getByText("Jul 1").querySelector("span")?.textContent).toBe("+0.10");
     expect(screen.getByText("Jul 8").querySelector("span")?.textContent).toBe("+0.40");
@@ -62,7 +62,9 @@ describe("CountryPanel history section", () => {
     mockHistory(series([0.1, 0.2]));
     const { container } = render(<CountryPanel country={COUNTRY} onClose={() => {}} />);
 
-    expect(screen.getByText("History accumulates daily — check back soon.")).toBeTruthy();
+    expect(
+      screen.getByText("We don't have enough data to show a history trend for this country yet."),
+    ).toBeTruthy();
     expect(container.querySelector("svg polyline")).toBeNull();
     // No chip either - two points can't describe a week.
     expect(screen.queryByText(/7d/)).toBeNull();
@@ -72,7 +74,9 @@ describe("CountryPanel history section", () => {
     mockHistory([]);
     render(<CountryPanel country={COUNTRY} onClose={() => {}} />);
 
-    expect(screen.getByText("History accumulates daily — check back soon.")).toBeTruthy();
+    expect(
+      screen.getByText("We don't have enough data to show a history trend for this country yet."),
+    ).toBeTruthy();
   });
 
   it("renders no history markup at all while loading, so the panel can't jump", () => {
@@ -80,7 +84,7 @@ describe("CountryPanel history section", () => {
     const { container } = render(<CountryPanel country={COUNTRY} onClose={() => {}} />);
 
     expect(screen.queryByText("30-day trend")).toBeNull();
-    expect(screen.queryByText(/History accumulates daily/)).toBeNull();
+    expect(screen.queryByText(/We don't have enough data/)).toBeNull();
     expect(container.querySelector("svg polyline")).toBeNull();
     // The rest of the panel is unaffected - the section appears in place below.
     expect(screen.getByText("United States")).toBeTruthy();
@@ -107,8 +111,8 @@ describe("CountryPanel historical mode", () => {
     );
 
     expect(
-      screen.getByText(/Headlines are only kept for the current day/).textContent,
-    ).toContain("showing the score recorded on 14 August 2026.");
+      screen.getByText(/We do not store headlines for past days/).textContent,
+    ).toContain("score recorded on 14 August 2026 is shown.");
     expect(screen.queryByText("Headlines")).toBeNull();
     expect(screen.queryByText("Today only")).toBeNull();
     // The sentiment bar reflects the historical score, not the country's current one.
@@ -120,7 +124,7 @@ describe("CountryPanel historical mode", () => {
     render(<CountryPanel country={COUNTRY} onClose={() => {}} />);
 
     expect(screen.getByText("Headlines")).toBeTruthy();
-    expect(screen.queryByText(/Headlines are only kept for the current day/)).toBeNull();
+    expect(screen.queryByText(/We do not store headlines for past days/)).toBeNull();
   });
 });
 
