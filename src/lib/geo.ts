@@ -35,6 +35,14 @@ export function dominantCentroid(pathGen: GeoPath, feature: Feature): [number, n
   return best ? pathGen.centroid(best) : pathGen.centroid(feature);
 }
 
+// Every ISO 3166-1 country's English name, keyed by UPPERCASE alpha-2. The
+// search covers all of them, not just the ~155 we score, so an uncovered
+// country reads as "not covered" rather than buggy. Must live here: this
+// module's registerLocale side effect is what makes the "en" names resolve.
+export function allCountryNames(): Record<string, string> {
+  return isoCountries.getNames("en");
+}
+
 // Alpha-2 → flag emoji, built from the two Unicode regional indicator symbols
 // rather than a lookup table (there are only 26, so it's cheaper than an
 // asset). Falls back to "" for anything that isn't a two-letter code, which

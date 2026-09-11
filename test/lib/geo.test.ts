@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { geoNaturalEarth1, geoPath } from "d3-geo";
 import type { Feature, Polygon, MultiPolygon } from "geojson";
-import { numericToAlpha2, dominantCentroid } from "../../src/lib/geo.js";
+import { numericToAlpha2, dominantCentroid, allCountryNames } from "../../src/lib/geo.js";
 
 // The real projection the map uses - these helpers are only meaningful in
 // projected space, so a synthetic identity projection would prove nothing.
@@ -59,5 +59,15 @@ describe("numericToAlpha2", () => {
 
   it("returns undefined for codes with no country", () => {
     expect(numericToAlpha2("999")).toBeUndefined();
+  });
+});
+
+describe("allCountryNames", () => {
+  it("returns the full ISO set of English names, keyed by uppercase alpha-2", () => {
+    const names = allCountryNames();
+    expect(Object.keys(names).length).toBeGreaterThan(200);
+    expect(names.US).toBe("United States of America");
+    expect(names.FJ).toBe("Fiji"); // present even though it has no sentiment data
+    expect(names.CD).toBe("Democratic Republic of the Congo");
   });
 });
