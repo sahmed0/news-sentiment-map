@@ -262,6 +262,40 @@ describe("App time scrubber", () => {
   });
 });
 
+describe("App world summary", () => {
+  // Enough countries and history for computeWorldSummary to return a stat;
+  // a flat series lands it in the neutral "in line" band.
+  const mockWorldHistoryWide = (dayCount: number, countryCount = 25, score = -0.2) => {
+    const d = days(dayCount);
+    const scores: Record<string, number[]> = {};
+    for (let c = 0; c < countryCount; c++) scores[`c${c}`] = d.map(() => score);
+    const history: WorldHistory = { days: d, scores };
+    vi.mocked(useWorldHistory).mockReturnValue({
+      history,
+      resolved: resolveWorldHistory(history),
+      loading: false,
+      error: false,
+    });
+  };
+
+  it("renders the mood stat under the title once the data supports one", () => {
+    mockHook({ data: [COUNTRY] });
+    mockWorldHistoryWide(20);
+    render(<App />);
+
+    expect(screen.getByText("In line with the last 30 days")).toBeTruthy();
+    expect(screen.getByText(/in line with the 30-day average/)).toBeTruthy();
+  });
+
+  it("shows no mood stat when the history is too thin", () => {
+    mockHook({ data: [COUNTRY] });
+    mockWorldHistoryWide(6);
+    render(<App />);
+
+    expect(screen.queryByText("In line with the last 30 days")).toBeNull();
+  });
+});
+
 describe("App map furniture", () => {
   it("shows the filter and the legend only once data has arrived", () => {
     mockHook({ loading: true });
