@@ -9,6 +9,7 @@ import isoCountries from "i18n-iso-countries";
 import topo from "world-atlas/countries-110m.json";
 import { bucketColor, scoreColor } from "../lib/sentiment";
 import { numericToAlpha2, dominantCentroid } from "../lib/geo";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import { CountryPaths } from "./CountryPaths";
 import type { CountryResult, FilterKey } from "../../shared/types";
 import type { Feature, FeatureCollection } from "geojson";
@@ -19,12 +20,15 @@ const world = topo as unknown as Topology<{ countries: GeometryCollection }>;
 
 const countries = feature(world, world.objects.countries).features as Feature[];
 
-// Imperative escape hatch for the scrubber. Writing 155 fills straight to the
+// Imperative escape hatch for TimeScrubber and Search. Writing 155 fills straight to the
 // DOM per frame skips React's diff - the same reason d3 owns the zoom transform
 // rather than re-rendering the component on every gesture frame.
+// Search justifies camera move - the user may not know where the country is,
+// so it reaches in and pans/zooms the map.
 export interface WorldMapHandle {
   paintScores(scores: Record<string, number | null>): void;
   releaseScores(): void;
+  focusCountry(code: string): void;
 }
 
 interface WorldMapProps {
@@ -49,6 +53,7 @@ interface LabelCandidate {
 }
 
 export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilter = "all", scores, handleRef }: WorldMapProps) {
+  const isMobile = useIsMobile();
   const svgRef = useRef<SVGSVGElement | null>(null);
   const gRef = useRef<SVGGElement | null>(null); // the <g> we apply zoom transforms to
   const zoomBehaviorRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null); // d3-zoom behavior, so resize can update its extent
@@ -211,25 +216,6 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
     return nodeMapRef.current;
   }, []);
 
-  useImperativeHandle(
-    handleRef,
-    () => ({
-      paintScores(next: Record<string, number | null>) {
-        svgRef.current?.classList.add("map-scrubbing");
-        getNodeMap().forEach((node, code) => {
-          const s = next[code];
-          node.style.fill = typeof s === "number" ? scoreColor(s) : "var(--map-empty)";
-        });
-      },
-      releaseScores() {
-        // React repaints the fills authoritatively from `scores` after this;
-        // just drop the transition-suppression class.
-        svgRef.current?.classList.remove("map-scrubbing");
-      },
-    }),
-    [getNodeMap],
-  );
-
   // -- Hover tooltip handler -------------------------------------------------
   const handleMouseMove = useCallback((e: React.MouseEvent, name: string, score: number | null | undefined) => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -245,6 +231,70 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
   const handleMouseLeave = useCallback(() => {
     setTooltip(null);
   }, []);
+
+  // Reverse of numericToAlpha2: focusCountry gets an alpha-2 and
+  // every geometry lookup below (paths, centroids, areas) is keyed by numeric id.
+  const alpha2ToNumId = useMemo(() => {
+    const m = new Map<string, string>();
+    countries.forEach((f) => {
+      if (f.id == null) return;
+      const numId = String(f.id).padStart(3, "0");
+      const a2 = numericToAlpha2(numId);
+      if (a2) m.set(a2.toUpperCase(), numId);
+    });
+    return m;
+  }, []); // `countries` is module-scope static data
+
+  // App drives scrub frames (paintScores/releaseScores) and the
+  // search camera move (focusCountry). One useImperativeHandle per ref - a second
+  // call on the same ref would overwrite this one rather than extend it.
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      paintScores(next: Record<string, number | null>) {
+        svgRef.current?.classList.add("map-scrubbing");
+        getNodeMap().forEach((node, code) => {
+          const s = next[code];
+          node.style.fill = typeof s === "number" ? scoreColor(s) : "var(--map-empty)";
+        });
+      },
+      releaseScores() {
+        // React repaints the fills from `scores` after this;
+        // just drop the transition-suppression class.
+        svgRef.current?.classList.remove("map-scrubbing");
+      },
+      // Pan + zoom so the searched country sits in the visible strip -
+      // the viewport minus the open panel on desktop, the top of the screen
+      // above the bottom sheet on mobile - then App opens the panel.
+      focusCountry(code: string) {
+        const svgEl = svgRef.current;
+        const zoomBehavior = zoomBehaviorRef.current;
+        if (!svgEl || !zoomBehavior) return;
+        const numId = alpha2ToNumId.get(code.toUpperCase());
+        if (!numId) return;
+        const centroid = centroids[numId];
+        if (!centroid) return;
+
+        const area = areas[numId];
+        // Smaller countries need a closer zoom.
+        const k = !area ? 1.5 : area < 1500 ? 3 : area < 8000 ? 2 : 1.5;
+
+        const w = svgEl.clientWidth || 960;
+        const h = svgEl.clientHeight || 500;
+        const RIGHT_PANEL_PX = 320; // matches CountryPanel's w-80
+        const targetX = isMobile ? w / 2 : (w - RIGHT_PANEL_PX) / 2;
+        const targetY = isMobile ? h * 0.12 : h / 2;
+
+        const t = zoomIdentity
+          .translate(targetX, targetY)
+          .scale(k)
+          .translate(-centroid[0], -centroid[1]);
+
+        select(svgEl).transition().duration(700).call(zoomBehavior.transform, t);
+      },
+    }),
+    [getNodeMap, alpha2ToNumId, centroids, areas, isMobile],
+  );
 
   // Greedy collision-filtered labels: largest countries placed first; a candidate
   // is skipped if its estimated bbox overlaps any already-placed label.
