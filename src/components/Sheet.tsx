@@ -32,7 +32,7 @@ export function Sheet({ open, onClose, title, children }: SheetProps) {
             if (info.offset.y > 120 || info.velocity.y > 500) onClose();
           }}
           transition={{ type: "spring", stiffness: 300, damping: 30 }}
-          className="absolute z-20 flex flex-col inset-x-0 bottom-0 max-h-[70dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)]"
+          className="absolute z-30 flex flex-col inset-x-0 bottom-0 max-h-[70dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)]"
           style={{
             background: "rgb(var(--panel-rgb) / 0.85)",
             backdropFilter: "blur(16px)",

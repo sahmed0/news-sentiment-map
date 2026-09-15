@@ -10,13 +10,14 @@ import { WorldSummary } from "./components/WorldSummary";
 import { Sheet } from "./components/Sheet";
 import { MobileToolbar, type MobileToolbarItem } from "./components/MobileToolbar";
 import { TimeScrubber } from "./components/TimeScrubber";
+import { CountrySearch } from "./components/CountrySearch";
 import { sentimentBucket } from "./lib/sentiment";
 import { computeWorldSummary } from "./lib/summary";
 import { scoresForDay, MIN_HISTORY_DAYS } from "./lib/worldHistory";
 import { useSentimentData } from "./hooks/useSentimentData";
 import { useWorldHistory } from "./hooks/useWorldHistory";
 import { useTheme } from "./hooks/useTheme";
-import { Sun, Moon, Info, Funnel, List, Clock } from 'lucide-react';
+import { Sun, Moon, Info, Funnel, List, Clock, Search } from 'lucide-react';
 import { InfoPanel } from "./components/InfoPanel";
 import type { CountryResult, FilterKey } from "../shared/types";
 
@@ -34,7 +35,7 @@ export default function App() {
   const [sentimentFilter, setSentimentFilter] = useState<FilterKey>("all");
   const [showInfo, setShowInfo] = useState(false);
   // Selecting a country closes whichever sheet is open.
-  const [openSheet, setOpenSheet] = useState<null | "filter" | "legend" | "time">(null);
+  const [openSheet, setOpenSheet] = useState<null | "filter" | "legend" | "time" | "find">(null);
   // The scrubber's day, or null for live/today. The map handle is driven
   // imperatively during a drag (see handlePreview) to skip 155 React diffs/frame.
   const [dayIndex, setDayIndex] = useState<number | null>(null);
@@ -144,6 +145,16 @@ export default function App() {
     dismissHint();
   }, [dismissHint]);
 
+  const setFindOpen = useCallback((open: boolean) => {
+    setOpenSheet(open ? "find" : null);
+  }, []);
+
+  // Search pans/zooms to the country.
+  const handleSearchSelect = useCallback((country: CountryResult) => {
+    mapRef.current?.focusCountry(country.code);
+    handleSelectCountry(country);
+  }, [handleSelectCountry]);
+
   const btnStyle = {
     background: "rgb(var(--fg-rgb) / 0.08)",
     border: "1px solid rgb(var(--fg-rgb) / 0.12)",
@@ -151,6 +162,13 @@ export default function App() {
   };
 
   const mobileToolbarItems: MobileToolbarItem[] = [
+    {
+      key: "find",
+      label: "Find",
+      icon: <Search size={20} />,
+      active: openSheet === "find",
+      onPress: () => setOpenSheet((s) => (s === "find" ? null : "find")),
+    },
     {
       key: "filter",
       label: "Filter",
@@ -215,8 +233,26 @@ export default function App() {
         )}
       </div>
 
-      {/* -- Top-right controls: theme toggle + info -- */}
+      {/* -- Top-right controls: find (desktop) + theme toggle + info -- */}
       <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+        {!loading && data.length > 0 && (
+          <button
+            onClick={() => setOpenSheet("find")}
+            className="hidden sm:flex items-center gap-1.5 h-9 px-3 rounded-lg transition-all text-xs font-medium"
+            style={btnStyle}
+            aria-label="Find a country"
+            title="Find a country (Ctrl/⌘ K)"
+          >
+            <Search size={16} />
+            <span>Find</span>
+            <kbd
+              className="ml-0.5 rounded px-1 text-[10px] font-sans not-italic opacity-70"
+              style={{ border: "1px solid rgb(var(--fg-rgb) / 0.2)" }}
+            >
+              ⌘K
+            </kbd>
+          </button>
+        )}
         <button
           onClick={toggleTheme}
           className="w-9 h-9 rounded-lg transition-all flex items-center justify-center"
@@ -292,10 +328,22 @@ export default function App() {
           selectedCode={selectedCountry?.code?.toUpperCase() ?? null}
           sentimentFilter={sentimentFilter}
           scores={activeScores}
-          handleRef={mapRef}
           onSelectCountry={handleSelectCountry}
+          handleRef={mapRef}
         />
       </div>
+
+      {/* -- Country search: ⌘K overlay on desktop, a Sheet on mobile. -- */}
+      {!loading && data.length > 0 && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <CountrySearch
+            byCode={byCode}
+            open={openSheet === "find"}
+            onOpenChange={setFindOpen}
+            onSelect={handleSearchSelect}
+          />
+        </div>
+      )}
 
       {/* -- Country detail panel -- */}
       <div onClick={(e) => e.stopPropagation()}>
