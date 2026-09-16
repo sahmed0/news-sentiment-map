@@ -296,6 +296,31 @@ describe("App world summary", () => {
   });
 });
 
+describe("App country search", () => {
+  it("finds and selects a country from the desktop Find button", () => {
+    mockHook({ data: [COUNTRY], byCode: { US: COUNTRY } });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Find a country" }));
+
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "united states" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // The selection opened the country panel.
+    expect(screen.getByRole("heading", { name: "United States" })).toBeTruthy();
+  });
+
+  it("opens search on Ctrl/⌘-K", () => {
+    mockHook({ data: [COUNTRY], byCode: { US: COUNTRY } });
+    render(<App />);
+
+    expect(screen.queryByRole("combobox")).toBeNull();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.getByRole("combobox")).toBeTruthy();
+  });
+});
+
 describe("App map furniture", () => {
   it("shows the filter and the legend only once data has arrived", () => {
     mockHook({ loading: true });
