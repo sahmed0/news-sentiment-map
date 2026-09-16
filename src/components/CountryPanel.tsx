@@ -8,7 +8,7 @@ import { Sparkline } from "./Sparkline";
 import { computeDelta7d, formatShortDate, formatLongDate } from "../lib/history";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useCountryHistory } from "../hooks/useCountryHistory";
-import { X } from 'lucide-react';
+import { ExternalLink, X } from 'lucide-react';
 import type { Article, CountryResult, FilterKey, HistoryPoint } from "../../shared/types";
 
 // Below MIN_HISTORY_POINTS there are not enough data points
@@ -89,9 +89,13 @@ function Headlines({ articles }: { articles: Article[] }) {
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="block text-sm leading-snug text-fg/95 light:text-black hover:text-fg transition-colors"
+                    className="text-sm leading-snug text-fg/95 light:text-black hover:text-fg hover:underline underline-offset-2 transition-colors"
                   >
                     {article.translatedTitle || article.title}
+                    <ExternalLink
+                      aria-hidden="true"
+                      className="inline-block w-3 h-3 ml-1 mb-0.5 opacity-50"
+                    />
                   </a>
                 ) : (
                   <span className="block text-sm leading-snug text-fg/95 light:text-black">
