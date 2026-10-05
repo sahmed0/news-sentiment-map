@@ -1,8 +1,9 @@
 // src/components/Legend.tsx
 import { useState } from "react";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { legendGradientCss, BUCKET_COLOR } from "../lib/sentiment";
 import { deriveRankings, type ScoredCountry } from "../lib/rankings";
+import { growMotion } from "../lib/motion";
 import { flagEmoji } from "../lib/geo";
 import type { CountryResult } from "../../shared/types";
 
@@ -15,6 +16,7 @@ function RankRow({ country, color, sign, delay }: {
   delay: number;
 }) {
   const pct = Math.min(Math.abs(country.score) * 100, 100);
+  const reducedMotion = useReducedMotion();
   return (
     <div className="flex items-center gap-1.5 mb-1.5 last:mb-0">
       <span className="text-xs leading-none shrink-0" aria-hidden="true">
@@ -32,9 +34,7 @@ function RankRow({ country, color, sign, delay }: {
           <motion.div
             className="h-full rounded-full"
             style={{ background: color }}
-            initial={{ width: 0 }}
-            animate={{ width: `${pct}%` }}
-            transition={{ duration: 0.5, delay, ease: "easeOut" }}
+            {...growMotion(!!reducedMotion, pct, { duration: 0.5, delay, ease: "easeOut" })}
           />
         </div>
       </div>

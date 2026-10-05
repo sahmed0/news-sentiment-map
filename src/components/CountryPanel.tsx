@@ -1,11 +1,12 @@
 // src/components/CountryPanel.tsx
 import { useState } from "react";
-import { motion, AnimatePresence, useDragControls, type MotionProps, type PanInfo } from "framer-motion";
+import { motion, AnimatePresence, useDragControls, useReducedMotion, type MotionProps, type PanInfo } from "framer-motion";
 import { sentimentBucket, bucketColor, BUCKET_COLOR } from "../lib/sentiment";
 import { safeHttpUrl } from "../lib/url";
 import { SentimentFilter } from "./SentimentFilter";
 import { Sparkline } from "./Sparkline";
 import { computeDelta7d, formatShortDate, formatLongDate } from "../lib/history";
+import { edgeMotion, growMotion } from "../lib/motion";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useCountryHistory } from "../hooks/useCountryHistory";
 import { ExternalLink, X } from 'lucide-react';
@@ -139,6 +140,7 @@ function SentimentBar({ score }: { score: number }) {
   // score is always numeric here, so bucketColor never returns null - the
   // fallback only keeps the type a plain string.
   const color = bucketColor(score) ?? BUCKET_COLOR.neutral;
+  const reducedMotion = useReducedMotion();
 
   const label =
     score > 0.5
@@ -168,9 +170,7 @@ function SentimentBar({ score }: { score: number }) {
         <motion.div
           className="h-full rounded-full"
           style={{ background: color }}
-          initial={{ width: 0 }}
-          animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.6, ease: "easeOut" }}
+          {...growMotion(!!reducedMotion, pct, { duration: 0.6, ease: "easeOut" })}
         />
       </div>
     </div>
@@ -276,11 +276,11 @@ interface CountryPanelProps {
 export function CountryPanel({ country, onClose, historical }: CountryPanelProps) {
   const isMobile = useIsMobile();
   const dragControls = useDragControls();
+  const reducedMotion = useReducedMotion();
+  const edge = edgeMotion(!!reducedMotion, isMobile ? "y" : "x", "100%");
   const motionProps: MotionProps = isMobile
     ? {
-        initial: { y: "100%", opacity: 0 },
-        animate: { y: 0, opacity: 1 },
-        exit: { y: "100%", opacity: 0 },
+        ...edge,
         drag: "y",
         dragListener: false,
         dragControls,
@@ -290,11 +290,7 @@ export function CountryPanel({ country, onClose, historical }: CountryPanelProps
           if (info.offset.y > 120 || info.velocity.y > 500) onClose();
         },
       }
-    : {
-        initial: { x: "100%", opacity: 0 },
-        animate: { x: 0, opacity: 1 },
-        exit: { x: "100%", opacity: 0 },
-      };
+    : edge;
 
   return (
     <AnimatePresence>

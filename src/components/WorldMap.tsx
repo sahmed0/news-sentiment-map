@@ -5,6 +5,7 @@ import { geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import { zoom, zoomIdentity, type ZoomBehavior, type D3ZoomEvent } from "d3-zoom";
 import { select } from "d3-selection";
+import { useReducedMotion } from "framer-motion";
 import isoCountries from "i18n-iso-countries";
 import topo from "world-atlas/countries-110m.json";
 import { bucketColor, scoreColor } from "../lib/sentiment";
@@ -54,6 +55,7 @@ interface LabelCandidate {
 
 export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilter = "all", scores, handleRef }: WorldMapProps) {
   const isMobile = useIsMobile();
+  const reducedMotion = useReducedMotion();
   const svgRef = useRef<SVGSVGElement | null>(null);
   const gRef = useRef<SVGGElement | null>(null); // the <g> we apply zoom transforms to
   const zoomBehaviorRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null); // d3-zoom behavior, so resize can update its extent
@@ -290,10 +292,11 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
           .scale(k)
           .translate(-centroid[0], -centroid[1]);
 
-        select(svgEl).transition().duration(700).call(zoomBehavior.transform, t);
+        // Reduced motion jumps straight to the target instead of animating.
+        select(svgEl).transition().duration(reducedMotion ? 0 : 700).call(zoomBehavior.transform, t);
       },
     }),
-    [getNodeMap, alpha2ToNumId, centroids, areas, isMobile],
+    [getNodeMap, alpha2ToNumId, centroids, areas, isMobile, reducedMotion],
   );
 
   // Greedy collision-filtered labels: largest countries placed first; a candidate

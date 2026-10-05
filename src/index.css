@@ -76,3 +76,12 @@ body {
 .map-scrubbing path {
   transition: none !important;
 }
+
+/* Reduced motion suppresses the same fill transition permanently, not just
+   while a drag is in progress - this also covers autoplay, which steps
+   through React (not paintScores) so .map-scrubbing is never applied to it. */
+@media (prefers-reduced-motion: reduce) {
+  path[data-code] {
+    transition: none !important;
+  }
+}

@@ -1,6 +1,7 @@
 // src/components/InfoPanel.tsx
-import { motion, AnimatePresence, useDragControls, type MotionProps, type PanInfo } from "framer-motion";
+import { motion, AnimatePresence, useDragControls, useReducedMotion, type MotionProps, type PanInfo } from "framer-motion";
 import { useIsMobile } from "../hooks/useMediaQuery";
+import { edgeMotion } from "../lib/motion";
 import { X } from 'lucide-react';
 import { Logo } from '@kiwicarbon/assets';
 
@@ -26,12 +27,12 @@ function GithubMark({ size = 28 }: { size?: number }) {
 export function InfoPanel({ open, onClose }: InfoPanelProps) {
   const isMobile = useIsMobile();
   const dragControls = useDragControls();
+  const reducedMotion = useReducedMotion();
 
+  const edge = edgeMotion(!!reducedMotion, isMobile ? "y" : "x", "100%");
   const motionProps: MotionProps = isMobile
     ? {
-        initial: { y: "100%", opacity: 0 },
-        animate: { y: 0, opacity: 1 },
-        exit: { y: "100%", opacity: 0 },
+        ...edge,
         drag: "y",
         dragListener: false,
         dragControls,
@@ -41,11 +42,7 @@ export function InfoPanel({ open, onClose }: InfoPanelProps) {
           if (info.offset.y > 120 || info.velocity.y > 500) onClose();
         },
       }
-    : {
-        initial: { x: "100%", opacity: 0 },
-        animate: { x: 0, opacity: 1 },
-        exit: { x: "100%", opacity: 0 },
-      };
+    : edge;
 
   return (
     <AnimatePresence>

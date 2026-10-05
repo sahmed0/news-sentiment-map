@@ -1,6 +1,7 @@
 // src/components/Sheet.tsx
 import type { ReactNode } from "react";
-import { motion, AnimatePresence, useDragControls, type PanInfo } from "framer-motion";
+import { motion, AnimatePresence, useDragControls, useReducedMotion, type PanInfo } from "framer-motion";
+import { edgeMotion } from "../lib/motion";
 import { X } from "lucide-react";
 
 interface SheetProps {
@@ -14,15 +15,14 @@ interface SheetProps {
 // verbatim from CountryPanel's mobile mode so the two feel identical.
 export function Sheet({ open, onClose, title, children }: SheetProps) {
   const dragControls = useDragControls();
+  const reducedMotion = useReducedMotion();
 
   return (
     <AnimatePresence>
       {open && (
         <motion.div
           key="sheet"
-          initial={{ y: "100%", opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          exit={{ y: "100%", opacity: 0 }}
+          {...edgeMotion(!!reducedMotion, "y", "100%")}
           drag="y"
           dragListener={false}
           dragControls={dragControls}

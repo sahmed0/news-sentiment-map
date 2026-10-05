@@ -1,5 +1,5 @@
 // src/components/FirstVisitHint.tsx
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { X } from "lucide-react";
 
 interface FirstVisitHintProps {
@@ -12,6 +12,7 @@ interface FirstVisitHintProps {
 // selecting any country, or automatically after a few seconds - and never
 // shown again once dismissed (see the localStorage flag in App.tsx).
 export function FirstVisitHint({ show, onDismiss }: FirstVisitHintProps) {
+  const reducedMotion = useReducedMotion();
   return (
     <AnimatePresence>
       {show && (
@@ -29,10 +30,12 @@ export function FirstVisitHint({ show, onDismiss }: FirstVisitHintProps) {
           }}
         >
           <span className="relative flex h-2 w-2 shrink-0">
-            <span
-              className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60"
-              style={{ background: "rgb(var(--fg-rgb))" }}
-            />
+            {!reducedMotion && (
+              <span
+                className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60"
+                style={{ background: "rgb(var(--fg-rgb))" }}
+              />
+            )}
             <span
               className="relative inline-flex rounded-full h-2 w-2"
               style={{ background: "rgb(var(--fg-rgb))" }}
