@@ -14,6 +14,7 @@ import {
   refundCounts,
   persistCountries,
   rebuildAggregate,
+  refreshWorldHistory,
   recordTick,
 } from "../_lib/refresh-core.js";
 import { log, warn, err, now, since } from "../_lib/logger.js";
@@ -69,6 +70,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   };
 
+  // Derived data - a failure here must never fail the tick (the next tick
+  // rebuilds it), so this mirrors safeRecord and returns "failed" for the debug
+  // block rather than throwing.
+  const safeWorldHistory = async (
+    points: readonly { code: string; score: number }[],
+    day: number,
+  ): Promise<"rebuilt" | "patched" | "failed"> => {
+    try {
+      return await refreshWorldHistory(redis, points, day);
+    } catch (e) {
+      warn("Tick", "world_history_failed", { message: e instanceof Error ? e.message : String(e) });
+      return "failed";
+    }
+  };
+
   try {
     const selection = await selectDueCountries(redis);
     const { subset, diag } = selection;
@@ -78,8 +94,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Nothing due and no budget/backfill - still rebuild so a freshly-warmed
       // country key is reflected, then exit cheaply.
       const count = await rebuildAggregate(redis);
+      // No fresh points, but the call still slides the window and lets the daily
+      // rebuild heal on a quiet tick.
+      const worldHistory = await safeWorldHistory([], selection.dayId);
       const reason = diag.budget <= 0 ? "budget_exhausted" : "all_done";
-      log("Tick", "idle", { reason, aggregate: count, ms: since(t0) });
+      log("Tick", "idle", { reason, aggregate: count, worldHistory, ms: since(t0) });
       // An idle tick attempted nothing, so every counter is zero - but it still
       // proves the cron fired, which is what the health status turns on.
       await safeRecord({
@@ -94,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         refunded: 0,
         ms: since(t0),
       });
-      return res.status(200).json({ ok: true, refreshed: [], aggregate: count, debug: { reason, selection: diag } });
+      return res.status(200).json({ ok: true, refreshed: [], aggregate: count, debug: { reason, selection: diag, worldHistory } });
     }
 
     // Reserve credits up front so a mid-tick crash can never under-count spend.
@@ -116,10 +135,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const refreshed = await persistCountries(redis, results, selection.dayId);
     const aggregate = await rebuildAggregate(redis);
 
+    // Only countries that actually produced a score this tick feed the patch;
+    // the rest keep their realigned prior values.
+    const scoredThisTick = new Set(refreshed);
+    const worldPoints = results
+      .filter((r): r is typeof r & { score: number } => scoredThisTick.has(r.code) && typeof r.score === "number")
+      .map((r) => ({ code: r.code, score: r.score }));
+    const worldHistory = await safeWorldHistory(worldPoints, selection.dayId);
+
     log("Tick", "done", {
       ok: refreshed.length,
       attempted: subset.length,
       aggregate,
+      worldHistory,
       ...stats.timings,
       ms: since(t0),
     });
@@ -146,6 +174,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         refunded,
         selection: diag,
         countries: stats.countries,
+        worldHistory,
       },
     });
   } catch (e) {

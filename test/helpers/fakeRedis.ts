@@ -7,7 +7,8 @@
 //   - zremrangeby* treat both bounds as inclusive and resolve negative ranks
 //   - lpush prepends (so index 0 is the newest); lrange/ltrim treat both bounds as
 //     inclusive, resolve negative indices from the end, and clamp out-of-range ones
-//   - pipeline() queues ops and applies them on exec()
+//   - pipeline() queues ops (including zrange, which the world-history rebuild
+//     pipelines one-per-country) and applies them on exec() in queue order
 // TTLs (ex / expire) are intentionally no-ops: tests inject `now`, they don't
 // wait for real expiry.
 
@@ -160,6 +161,7 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
         expire: push("expire"),
         sadd: push("sadd"),
         zadd: push("zadd"),
+        zrange: push("zrange"),
         zremrangebyscore: push("zremrangebyscore"),
         zremrangebyrank: push("zremrangebyrank"),
         lpush: push("lpush"),

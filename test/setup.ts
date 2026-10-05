@@ -27,4 +27,27 @@ if (typeof window !== "undefined") {
       disconnect() {}
     };
   }
+
+  // jsdom doesn't know how to measure SVG elements, so `svg.width` is normally
+  // undefined here. d3-zoom reads that width every time a zoom starts,
+  // even a code-triggered one like WorldMap's focusCountry animation, and
+  // crashes when it's undefined. That crash happens in a delayed callback, so
+  // if the test file finishes before the 700ms animation does, it shows up
+  // later as a confusing unhandled error instead of a normal test failure.
+  // Fix: give the SVG element a real width/height so the crash never happens.
+  const svgProto = window.SVGSVGElement?.prototype;
+  if (svgProto && !("width" in svgProto)) {
+    for (const dim of ["width", "height"] as const) {
+      Object.defineProperty(svgProto, dim, {
+        configurable: true,
+        get(this: SVGSVGElement) {
+          const attr = Number(this.getAttribute(dim));
+          const value = Number.isFinite(attr) && attr > 0
+            ? attr
+            : (dim === "width" ? this.clientWidth : this.clientHeight) || 0;
+          return { baseVal: { value }, animVal: { value } };
+        },
+      });
+    }
+  }
 }

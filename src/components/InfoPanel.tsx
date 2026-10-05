@@ -1,6 +1,7 @@
 // src/components/InfoPanel.tsx
-import { motion, AnimatePresence, useDragControls, type MotionProps, type PanInfo } from "framer-motion";
+import { motion, AnimatePresence, useDragControls, useReducedMotion, type MotionProps, type PanInfo } from "framer-motion";
 import { useIsMobile } from "../hooks/useMediaQuery";
+import { edgeMotion } from "../lib/motion";
 import { X } from 'lucide-react';
 import { Logo } from '@kiwicarbon/assets';
 
@@ -26,12 +27,12 @@ function GithubMark({ size = 28 }: { size?: number }) {
 export function InfoPanel({ open, onClose }: InfoPanelProps) {
   const isMobile = useIsMobile();
   const dragControls = useDragControls();
+  const reducedMotion = useReducedMotion();
 
+  const edge = edgeMotion(!!reducedMotion, isMobile ? "y" : "x", "100%");
   const motionProps: MotionProps = isMobile
     ? {
-        initial: { y: "100%", opacity: 0 },
-        animate: { y: 0, opacity: 1 },
-        exit: { y: "100%", opacity: 0 },
+        ...edge,
         drag: "y",
         dragListener: false,
         dragControls,
@@ -41,11 +42,7 @@ export function InfoPanel({ open, onClose }: InfoPanelProps) {
           if (info.offset.y > 120 || info.velocity.y > 500) onClose();
         },
       }
-    : {
-        initial: { x: "100%", opacity: 0 },
-        animate: { x: 0, opacity: 1 },
-        exit: { x: "100%", opacity: 0 },
-      };
+    : edge;
 
   return (
     <AnimatePresence>
@@ -88,7 +85,7 @@ export function InfoPanel({ open, onClose }: InfoPanelProps) {
             </div>
             <button
               onClick={onClose}
-              className="w-9 h-9 shrink-0 flex items-center justify-center text-gray-400 hover:opacity-70 transition-opacity"
+              className="w-9 h-9 shrink-0 flex items-center justify-center text-fg/60 hover:opacity-70 transition-opacity"
               aria-label="Close panel"
             >
               <X />
@@ -161,6 +158,18 @@ export function InfoPanel({ open, onClose }: InfoPanelProps) {
                 <br></br>
                 Additionally, the covered countries are split into high & low priority groups based on their global media presence. High priority countries are updated every day from GNews, while low priority countries are updated every 2 days from NewsData.io.
                 Some low priority countries that are currently covered may be removed if rate limits become difficult to manage.
+              </p>
+            </section>
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-widest mb-2">
+                Reading the timeline
+              </h3>
+              <p>
+                The timeline scrubs back through the last 30 days of scored headlines, one day at a time.
+                <br></br>
+                Not every country refreshes daily - low priority countries update roughly every 2 days - so a day with no fresh headlines carries the country's last known score forward for up to 3 days before it is shown as unscored again, rather than flickering gray on the map.
+                <br></br>
+                Headlines themselves are only kept for the current day, so scrubbing to a past day shows that day's recorded score without the headlines behind it.
               </p>
             </section>
             <section>

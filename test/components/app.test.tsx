@@ -8,6 +8,17 @@ vi.mock("../../src/hooks/useSentimentData.js", () => ({
   useSentimentData: vi.fn(),
 }));
 
+// The scrubber's data source. Default: empty history (no scrubber) - individual
+// tests override it to exercise the timeline.
+vi.mock("../../src/hooks/useWorldHistory.js", () => ({
+  useWorldHistory: vi.fn(() => ({
+    history: { days: [], scores: {} },
+    resolved: {},
+    loading: false,
+    error: true,
+  })),
+}));
+
 // The map is not what these assertions are about, and mounting it would parse
 // the bundled 110m topology and project ~180 features per test.
 vi.mock("../../src/components/WorldMap.js", () => ({
@@ -15,6 +26,9 @@ vi.mock("../../src/components/WorldMap.js", () => ({
 }));
 
 import { useSentimentData } from "../../src/hooks/useSentimentData.js";
+import { useWorldHistory } from "../../src/hooks/useWorldHistory.js";
+import { resolveWorldHistory } from "../../src/lib/worldHistory.js";
+import type { WorldHistory } from "../../shared/types";
 import App from "../../src/App.js";
 
 const COUNTRY: CountryResult = {
@@ -41,8 +55,28 @@ const mockHook = (over: Partial<UseSentimentData> = {}) =>
     ...over,
   });
 
+const EMPTY_WORLD_HISTORY = { history: { days: [], scores: {} }, resolved: {}, loading: false, error: true };
+
+const mockWorldHistory = (days: string[]) => {
+  const history: WorldHistory = {
+    days,
+    scores: { us: days.map((_, i) => Math.min(0.9, -0.3 + i * 0.02)) },
+  };
+  vi.mocked(useWorldHistory).mockReturnValue({
+    history,
+    resolved: resolveWorldHistory(history),
+    loading: false,
+    error: false,
+  });
+};
+
+const days = (n: number) =>
+  Array.from({ length: n }, (_, i) => `2026-08-${String(i + 1).padStart(2, "0")}`);
+
 beforeEach(() => {
   vi.mocked(useSentimentData).mockReset();
+  vi.mocked(useWorldHistory).mockReset();
+  vi.mocked(useWorldHistory).mockReturnValue(EMPTY_WORLD_HISTORY);
   refetch.mockReset();
 });
 afterEach(cleanup);
@@ -83,6 +117,207 @@ describe("App error banner", () => {
     render(<App />);
 
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+});
+
+describe("App brand block", () => {
+  it("renders the title on desktop", () => {
+    mockHook({ data: [COUNTRY] });
+    render(<App />);
+
+    expect(screen.getByText("World News Sentiment")).toBeTruthy();
+  });
+
+  it("renders the title on mobile too (regression: it used to be hidden below sm)", () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      mockHook({ data: [COUNTRY] });
+      render(<App />);
+
+      expect(screen.getByText("World News Sentiment")).toBeTruthy();
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
+  });
+});
+
+describe("App mobile toolbar", () => {
+  it("shows Filter and Legend items that open sheets, with no old bottom filter bar", () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      mockHook({ data: [COUNTRY] });
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+      expect(screen.getByRole("heading", { name: "Filter by sentiment" })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "Legend" }));
+      expect(screen.getByRole("heading", { name: "Legend & rankings" })).toBeTruthy();
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
+  });
+
+  // Regression: the toolbar and the info panel share the bottom edge on
+  // mobile at the same z-index. Left both up at once, the toolbar (which has
+  // no closed state of its own) would paint over the panel's last ~60px and
+  // stay tappable there, and a sheet opened earlier would linger underneath it.
+  it("hides itself and closes any open sheet once the info panel opens", () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      mockHook({ data: [COUNTRY] });
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+      expect(screen.getByRole("heading", { name: "Filter by sentiment" })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "About this project" }));
+
+      expect(screen.queryByRole("heading", { name: "Filter by sentiment" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Filter" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Legend" })).toBeNull();
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
+  });
+});
+
+describe("App time scrubber", () => {
+  it("shows no scrubber with fewer than a week of history", () => {
+    mockHook({ data: [COUNTRY] });
+    mockWorldHistory(days(6));
+    render(<App />);
+
+    expect(screen.queryByRole("slider")).toBeNull();
+  });
+
+  it("renders the desktop scrubber once there is enough history", () => {
+    mockHook({ data: [COUNTRY] });
+    mockWorldHistory(days(20));
+    render(<App />);
+
+    expect(screen.getByRole("slider")).toBeTruthy();
+    // Starts live: the LIVE button is disabled on the latest day.
+    expect((screen.getByRole("button", { name: "Live" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("adds a Time item to the mobile toolbar that opens the timeline sheet", () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      mockHook({ data: [COUNTRY] });
+      mockWorldHistory(days(20));
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Time" }));
+      expect(screen.getByRole("heading", { name: "Timeline" })).toBeTruthy();
+      // The desktop dock plus the sheet's own copy.
+      expect(screen.getAllByRole("slider").length).toBeGreaterThanOrEqual(1);
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
+  });
+});
+
+describe("App world summary", () => {
+  // Enough countries and history for computeWorldSummary to return a stat;
+  // a flat series lands it in the neutral "in line" band.
+  const mockWorldHistoryWide = (dayCount: number, countryCount = 25, score = -0.2) => {
+    const d = days(dayCount);
+    const scores: Record<string, number[]> = {};
+    for (let c = 0; c < countryCount; c++) scores[`c${c}`] = d.map(() => score);
+    const history: WorldHistory = { days: d, scores };
+    vi.mocked(useWorldHistory).mockReturnValue({
+      history,
+      resolved: resolveWorldHistory(history),
+      loading: false,
+      error: false,
+    });
+  };
+
+  it("renders the mood stat under the title once the data supports one", () => {
+    mockHook({ data: [COUNTRY] });
+    mockWorldHistoryWide(20);
+    render(<App />);
+
+    expect(screen.getByText("In line with the last 30 days")).toBeTruthy();
+    expect(screen.getByText(/in line with the 30-day average/)).toBeTruthy();
+  });
+
+  it("shows no mood stat when the history is too thin", () => {
+    mockHook({ data: [COUNTRY] });
+    mockWorldHistoryWide(6);
+    render(<App />);
+
+    expect(screen.queryByText("In line with the last 30 days")).toBeNull();
+  });
+});
+
+describe("App country search", () => {
+  it("finds and selects a country from the desktop Find button", () => {
+    mockHook({ data: [COUNTRY], byCode: { US: COUNTRY } });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Find a country" }));
+
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "united states" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // The selection opened the country panel.
+    expect(screen.getByRole("heading", { name: "United States" })).toBeTruthy();
+  });
+
+  it("opens search on Ctrl/⌘-K", () => {
+    mockHook({ data: [COUNTRY], byCode: { US: COUNTRY } });
+    render(<App />);
+
+    expect(screen.queryByRole("combobox")).toBeNull();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.getByRole("combobox")).toBeTruthy();
   });
 });
 

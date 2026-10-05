@@ -57,6 +57,15 @@ export interface HistoryResponse {
   points: HistoryPoint[];
 }
 
+// The bulk history payload (GET /api/world-history). Columnar rather than
+// per-point objects: 155 countries x 30 days is ~30 KB this way against ~210 KB
+// as objects, and the scrubber needs O(1) lookup per country per frame.
+export interface WorldHistory {
+  days: string[]; // "YYYY-MM-DD", ascending, length <= 30
+  scores: Record<string, (number | null)[]>; // lowercase alpha-2 -> one entry per day, null = no point
+}
+export type WorldHistoryResponse = WorldHistory;
+
 // Tick summary pushed to sentiment:ticks.
 export interface TickSummary {
   ts: string; // ISO
@@ -120,6 +129,9 @@ export interface RedisPipelineLike {
   expire(key: string, seconds: number): RedisPipelineLike;
   sadd(key: string, ...members: string[]): RedisPipelineLike;
   zadd(key: string, entry: { score: number; member: string }, ...entries: { score: number; member: string }[]): RedisPipelineLike;
+  // Mirrors the signature on RedisLike; the interface simply had not needed it
+  // until the world-history rebuild wanted one round trip instead of 155.
+  zrange(key: string, start: number, stop: number, opts?: { withScores?: boolean }): RedisPipelineLike;
   zremrangebyscore(key: string, min: number, max: number): RedisPipelineLike;
   zremrangebyrank(key: string, start: number, stop: number): RedisPipelineLike;
   lpush(key: string, ...values: string[]): RedisPipelineLike;
@@ -187,6 +199,34 @@ export function parseHistoryPoint(v: unknown): StoredHistoryPoint | null {
   const { d, s, n } = parsed;
   if (!Number.isFinite(d) || !Number.isFinite(s) || !Number.isFinite(n)) return null;
   return { d: Number(d), s: Number(s), n: Number(n) };
+}
+
+// Narrow an untyped Redis value into a WorldHistory, or null when it can't be
+// one - an absent key, a truncated write, or an older shape. The value arrives
+// either as the JSON string the cron wrote or as an already-parsed object (the
+// Upstash client deserializes responses it recognises), so both forms are
+// accepted. A null here reads as "absent": the API answers a warming 503 and the
+// cron does a full rebuild, so a malformed key self-heals rather than crashing a
+// read or serving garbage.
+export function parseWorldHistory(v: unknown): WorldHistory | null {
+  let parsed: unknown = v;
+  if (typeof v === "string") {
+    try {
+      parsed = JSON.parse(v);
+    } catch {
+      return null;
+    }
+  }
+  if (!isRecord(parsed)) return null;
+  const { days, scores } = parsed;
+  if (!Array.isArray(days) || !days.every((d) => typeof d === "string")) return null;
+  if (!isRecord(scores)) return null;
+  for (const arr of Object.values(scores)) {
+    // Every series must line up with `days` - realigning by date depends on it.
+    if (!Array.isArray(arr) || arr.length !== days.length) return null;
+    if (!arr.every((s) => s === null || Number.isFinite(s))) return null;
+  }
+  return { days: days as string[], scores: scores as Record<string, (number | null)[]> };
 }
 
 // Narrow one entry of the tick list into a TickSummary. The value arrives either

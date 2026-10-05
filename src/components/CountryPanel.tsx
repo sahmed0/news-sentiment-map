@@ -1,14 +1,15 @@
 // src/components/CountryPanel.tsx
 import { useState } from "react";
-import { motion, AnimatePresence, useDragControls, type MotionProps, type PanInfo } from "framer-motion";
+import { motion, AnimatePresence, useDragControls, useReducedMotion, type MotionProps, type PanInfo } from "framer-motion";
 import { sentimentBucket, bucketColor, BUCKET_COLOR } from "../lib/sentiment";
 import { safeHttpUrl } from "../lib/url";
 import { SentimentFilter } from "./SentimentFilter";
 import { Sparkline } from "./Sparkline";
-import { computeDelta7d, formatShortDate } from "../lib/history";
+import { computeDelta7d, formatShortDate, formatLongDate } from "../lib/history";
+import { edgeMotion, growMotion } from "../lib/motion";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useCountryHistory } from "../hooks/useCountryHistory";
-import { X } from 'lucide-react';
+import { ExternalLink, X } from 'lucide-react';
 import type { Article, CountryResult, FilterKey, HistoryPoint } from "../../shared/types";
 
 // Below MIN_HISTORY_POINTS there are not enough data points
@@ -89,9 +90,13 @@ function Headlines({ articles }: { articles: Article[] }) {
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="block text-sm leading-snug text-fg/95 light:text-black hover:text-fg transition-colors"
+                    className="text-sm leading-snug text-fg/95 light:text-black hover:text-fg hover:underline underline-offset-2 transition-colors"
                   >
                     {article.translatedTitle || article.title}
+                    <ExternalLink
+                      aria-hidden="true"
+                      className="inline-block w-3 h-3 ml-1 mb-0.5 opacity-50"
+                    />
                   </a>
                 ) : (
                   <span className="block text-sm leading-snug text-fg/95 light:text-black">
@@ -135,6 +140,7 @@ function SentimentBar({ score }: { score: number }) {
   // score is always numeric here, so bucketColor never returns null - the
   // fallback only keeps the type a plain string.
   const color = bucketColor(score) ?? BUCKET_COLOR.neutral;
+  const reducedMotion = useReducedMotion();
 
   const label =
     score > 0.5
@@ -164,9 +170,7 @@ function SentimentBar({ score }: { score: number }) {
         <motion.div
           className="h-full rounded-full"
           style={{ background: color }}
-          initial={{ width: 0 }}
-          animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.6, ease: "easeOut" }}
+          {...growMotion(!!reducedMotion, pct, { duration: 0.6, ease: "easeOut" })}
         />
       </div>
     </div>
@@ -253,7 +257,7 @@ function HistorySection({ code }: { code: string }) {
         </>
       ) : (
         <p className="text-xs text-fg/40 light:text-black/50">
-          History accumulates daily — check back soon.
+          We don't have enough data to show a history trend for this country yet.
         </p>
       )}
     </div>
@@ -263,20 +267,21 @@ function HistorySection({ code }: { code: string }) {
 interface CountryPanelProps {
   country: CountryResult | null;
   onClose: () => void;
+  // Set when the scrubber is on a past day: the sentiment bar shows this day's
+  // score and no headlines, since headlines are only kept for the current
+  // day. Undefined = normal behavior. `carried` marks a score that was filled
+  // forward from an earlier day rather than actually measured on this one.
+  historical?: { date: string; score: number | null; carried?: boolean };
 }
 
-export function CountryPanel({ country, onClose }: CountryPanelProps) {
+export function CountryPanel({ country, onClose, historical }: CountryPanelProps) {
   const isMobile = useIsMobile();
   const dragControls = useDragControls();
-
-  // Mobile: a bottom sheet that slides up and can be flicked down to dismiss.
-  // Drag is initiated only from the grab handle (see below) so the headlines
-  // list scrolls normally. ≥md: a side panel that slides in from the right.
+  const reducedMotion = useReducedMotion();
+  const edge = edgeMotion(!!reducedMotion, isMobile ? "y" : "x", "100%");
   const motionProps: MotionProps = isMobile
     ? {
-        initial: { y: "100%", opacity: 0 },
-        animate: { y: 0, opacity: 1 },
-        exit: { y: "100%", opacity: 0 },
+        ...edge,
         drag: "y",
         dragListener: false,
         dragControls,
@@ -286,11 +291,7 @@ export function CountryPanel({ country, onClose }: CountryPanelProps) {
           if (info.offset.y > 120 || info.velocity.y > 500) onClose();
         },
       }
-    : {
-        initial: { x: "100%", opacity: 0 },
-        animate: { x: 0, opacity: 1 },
-        exit: { x: "100%", opacity: 0 },
-      };
+    : edge;
 
   return (
     <AnimatePresence>
@@ -322,47 +323,53 @@ export function CountryPanel({ country, onClose }: CountryPanelProps) {
           {/* Header */}
           <div className="flex items-center justify-between px-5 pt-3 sm:pt-5 pb-3 border-b border-fg/8 shrink-0">
             <div>
-              <div className="flex items-center gap-2 mb-0.5">
-                <p className="text-xs uppercase tracking-widest opacity-60 light:opacity-65">
-                  Country
-                </p>
-                <span
-                  className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                    country.highPriority
-                      ? "bg-blue-500/15 text-blue-400 light:bg-blue-500/20 light:text-blue-600"
-                      : "bg-fg/8 text-fg/40 light:text-black/40"
-                  }`}
-                >
-                  {country.highPriority ? "High Priority" : "Low Priority"}
-                </span>
-              </div>
-              <h2 className="text-lg font-bold tracking-tight">
+              <p className="text-xs uppercase tracking-widest opacity-60 light:opacity-65 mb-0.5">
+                Country
+              </p>
+              <h2
+                className="text-xl font-bold tracking-tight"
+                style={{ fontFamily: "'DM Serif Display', serif" }}
+              >
                 {country.name}
               </h2>
             </div>
             <button
               onClick={onClose}
-              className="w-9 h-9 shrink-0 -mr-1.5 rounded-full flex items-center justify-center text-gray-400 transition-colors text-xl leading-none"
+              className="w-9 h-9 shrink-0 -mr-1.5 rounded-full flex items-center justify-center text-fg/60 transition-colors text-xl leading-none"
               aria-label="Close panel"
             >
               <X />
             </button>
           </div>
 
-          {/* Sentiment score - only shown for scored countries (the map only
-              opens the panel when a country has a numeric score). */}
-          {typeof country.score === "number" && (
+          {/* Sentiment score */}
+          {typeof (historical ? historical.score : country.score) === "number" && (
             <div className="px-5 pt-4">
-              <SentimentBar score={country.score} />
+              <SentimentBar score={(historical ? historical.score : country.score) as number} />
             </div>
           )}
 
           {/* Daily sentiment history - absent until the country has been
-              scored on enough days (see HistorySection). */}
+              scored on enough days. */}
           <HistorySection code={country.code} />
 
-          {/* Headlines + sentiment filter */}
-          <Headlines articles={country.articles ?? []} />
+          {/* Headlines are only stored for the current day, so a past day shows
+          this note instead. */}
+          {historical ? (
+            <div className="flex-1 overflow-y-auto px-5 pb-5">
+              <p className="text-sm text-fg/60 light:text-black/70 leading-snug">
+                We do not store headlines for past days, so only the score
+                recorded on {formatLongDate(historical.date)} is shown.
+              </p>
+              {historical.carried && (
+                <p className="text-xs text-fg/40 light:text-black/50 leading-snug mt-2">
+                  No headlines were scored for this country that day - showing its most recent earlier score.
+                </p>
+              )}
+            </div>
+          ) : (
+            <Headlines articles={country.articles ?? []} />
+          )}
         </motion.div>
       )}
     </AnimatePresence>
