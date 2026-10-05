@@ -161,6 +161,18 @@ export function InfoPanel({ open, onClose }: InfoPanelProps) {
               </p>
             </section>
             <section>
+              <h3 className="text-xs font-semibold uppercase tracking-widest mb-2">
+                Reading the timeline
+              </h3>
+              <p>
+                The timeline scrubs back through the last 30 days of scored headlines, one day at a time.
+                <br></br>
+                Not every country refreshes daily - low priority countries update roughly every 2 days - so a day with no fresh headlines carries the country's last known score forward for up to 3 days before it is shown as unscored again, rather than flickering gray on the map.
+                <br></br>
+                Headlines themselves are only kept for the current day, so scrubbing to a past day shows that day's recorded score without the headlines behind it.
+              </p>
+            </section>
+            <section>
               <h3 className="text-xs font-semibold uppercase tracking-widest mb-2">Disclaimer</h3>
               <p>
                 The purpose of this project is purely to demonstrate the application of natural language processing for sentiment analysis and provide an interactive visualisation of media attitudes around the globe.

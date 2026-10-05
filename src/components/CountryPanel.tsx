@@ -269,8 +269,9 @@ interface CountryPanelProps {
   onClose: () => void;
   // Set when the scrubber is on a past day: the sentiment bar shows this day's
   // score and no headlines, since headlines are only kept for the current
-  // day. Undefined = normal behavior.
-  historical?: { date: string; score: number | null };
+  // day. Undefined = normal behavior. `carried` marks a score that was filled
+  // forward from an earlier day rather than actually measured on this one.
+  historical?: { date: string; score: number | null; carried?: boolean };
 }
 
 export function CountryPanel({ country, onClose, historical }: CountryPanelProps) {
@@ -360,6 +361,11 @@ export function CountryPanel({ country, onClose, historical }: CountryPanelProps
                 We do not store headlines for past days, so only the score
                 recorded on {formatLongDate(historical.date)} is shown.
               </p>
+              {historical.carried && (
+                <p className="text-xs text-fg/40 light:text-black/50 leading-snug mt-2">
+                  No headlines were scored for this country that day - showing its most recent earlier score.
+                </p>
+              )}
             </div>
           ) : (
             <Headlines articles={country.articles ?? []} />

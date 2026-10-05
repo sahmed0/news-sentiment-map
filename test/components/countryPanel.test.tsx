@@ -126,6 +126,38 @@ describe("CountryPanel historical mode", () => {
     expect(screen.getByText("Headlines")).toBeTruthy();
     expect(screen.queryByText(/We do not store headlines for past days/)).toBeNull();
   });
+
+  it("adds a carried-day note when the shown score was filled rather than measured", () => {
+    mockHistory([]);
+    render(
+      <CountryPanel
+        country={COUNTRY}
+        onClose={() => {}}
+        historical={{ date: "2026-08-14", score: -0.1, carried: true }}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "No headlines were scored for this country that day - showing its most recent earlier score.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("omits the carried-day note when the day's score was actually measured", () => {
+    mockHistory([]);
+    render(
+      <CountryPanel
+        country={COUNTRY}
+        onClose={() => {}}
+        historical={{ date: "2026-08-14", score: -0.1, carried: false }}
+      />,
+    );
+
+    expect(
+      screen.queryByText(/No headlines were scored for this country that day/),
+    ).toBeNull();
+  });
 });
 
 const article = (over: Partial<Article> = {}): Article => ({

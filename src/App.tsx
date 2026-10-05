@@ -355,6 +355,7 @@ export default function App() {
               ? {
                   date: history.days[activeDayIndex],
                   score: dayScores[selectedCountry.code.toUpperCase()] ?? null,
+                  carried: resolved[selectedCountry.code.toUpperCase()]?.[activeDayIndex]?.carried ?? false,
                 }
               : undefined
           }
