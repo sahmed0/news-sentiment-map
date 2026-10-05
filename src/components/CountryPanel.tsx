@@ -334,7 +334,7 @@ export function CountryPanel({ country, onClose, historical }: CountryPanelProps
             </div>
             <button
               onClick={onClose}
-              className="w-9 h-9 shrink-0 -mr-1.5 rounded-full flex items-center justify-center text-gray-400 transition-colors text-xl leading-none"
+              className="w-9 h-9 shrink-0 -mr-1.5 rounded-full flex items-center justify-center text-fg/60 transition-colors text-xl leading-none"
               aria-label="Close panel"
             >
               <X />

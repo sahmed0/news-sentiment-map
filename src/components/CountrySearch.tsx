@@ -273,7 +273,7 @@ export function CountrySearch({ byCode, open, onOpenChange, onSelect }: CountryS
               </span>
               <button
                 onClick={() => onOpenChange(false)}
-                className="-mr-1 flex h-7 w-7 items-center justify-center rounded-full text-gray-400"
+                className="-mr-1 flex h-7 w-7 items-center justify-center rounded-full text-fg/60"
                 aria-label="Close"
               >
                 <X size={16} />

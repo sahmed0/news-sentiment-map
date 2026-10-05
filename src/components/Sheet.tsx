@@ -54,7 +54,7 @@ export function Sheet({ open, onClose, title, children }: SheetProps) {
             </h2>
             <button
               onClick={onClose}
-              className="w-9 h-9 shrink-0 -mr-1.5 rounded-full flex items-center justify-center text-gray-400 transition-colors"
+              className="w-9 h-9 shrink-0 -mr-1.5 rounded-full flex items-center justify-center text-fg/60 transition-colors"
               aria-label="Close"
             >
               <X />
