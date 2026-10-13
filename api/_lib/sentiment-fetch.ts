@@ -8,13 +8,12 @@ import type { Article, CountryDef, CountryResult, RawArticle } from "../../share
 // zones are rounded to the nearest hour; DST drift of +-1 h is tolerated since
 // NewsData.io's free tier already lags ~12 h, so exact timing doesn't matter.
 //
-// lang = the country's primary news language as a lowercase English name, in the
-// SAME vocabulary NewsData.io reports (e.g. "english", "german"). High-
-// priority countries are fetched from GNews, whose top-headlines response carries
-// NO per-article language, so we tag every GNews headline with this value to drive
-// the same translate/score routing NewsData's per-article language drives. Azure
-// still auto-detects on translate, so a mistagged stray (e.g. an English wire
-// story in a non-English feed) degrades gracefully rather than breaking.
+// lang = ISO 639-1 code(s) for the country's news languages: one code for
+// high-priority countries, a comma-joined list for low-priority ones (filtered by
+// newsDataLanguages). GNews returns no per-article language, so GNews headlines
+// are tagged with this code mapped to NewsData's vocabulary (ISO_TO_NEWSDATA_LANG)
+// to drive translate/score routing. Azure auto-detects on translate, so a
+// mistagged headline still degrades gracefully.
 
 export const HIGH_PRIORITY_COUNTRIES: readonly CountryDef[] = [
   { code: "us", name: "United States", utcOffset: -5, lang: "en" },
@@ -109,7 +108,7 @@ export const LOW_PRIORITY_COUNTRIES: readonly CountryDef[] = [
   { code: "so", name: "Somalia", utcOffset: 3, lang: "en,ar" },
   { code: "sd", name: "Sudan", utcOffset: 2, lang: "ar,en" },
   { code: "py", name: "Paraguay", utcOffset: -4, lang: "es,en" },
-  { code: "kz", name: "Kazakhstan", utcOffset: 5, lang: "kz,en" },
+  { code: "kz", name: "Kazakhstan", utcOffset: 5, lang: "kk,en" }, // kk = Kazakh; "kz" was the country code
   { code: "zm", name: "Zambia", utcOffset: 2, lang: "en" },
   { code: "cd", name: "DR Congo", utcOffset: 1, lang: "fr,en,sw" },
   { code: "ao", name: "Angola", utcOffset: 1, lang: "pt,en" },
@@ -118,7 +117,7 @@ export const LOW_PRIORITY_COUNTRIES: readonly CountryDef[] = [
   { code: "cm", name: "Cameroon", utcOffset: 1, lang: "fr,en" },
   { code: "mn", name: "Mongolia", utcOffset: 8, lang: "mn,en" },
   { code: "kp", name: "North Korea", utcOffset: 9, lang: "ko,en" },
-  { code: "ml", name: "Mali", utcOffset: 0, lang: "bm,fr,en" },
+  { code: "ml", name: "Mali", utcOffset: 0, lang: "bm,fr,en" }, // bm (Bambara) is dropped: Azure cannot translate it (see NEWSDATA_SUPPORTED_LANGS)
   { code: "td", name: "Chad", utcOffset: 1, lang: "fr,ar,en" },
   { code: "mr", name: "Mauritania", utcOffset: 0, lang: "ar,en" },
   { code: "ne", name: "Niger", utcOffset: 1, lang: "fr,ha,en" },
@@ -131,12 +130,12 @@ export const LOW_PRIORITY_COUNTRIES: readonly CountryDef[] = [
   { code: "mg", name: "Madagascar", utcOffset: 3, lang: "fr,en" },
   { code: "tm", name: "Turkmenistan", utcOffset: 5, lang: "tk,en" },
   { code: "kg", name: "Kyrgyzstan", utcOffset: 5, lang: "ru,en" },
-  { code: "tj", name: "Tajikistan", utcOffset: 5, lang: "tg,en" },
+  { code: "tj", name: "Tajikistan", utcOffset: 5, lang: "tg,en" }, // tg (Tajik) is dropped: Azure cannot translate it, so this sends "en" alone
   { code: "az", name: "Azerbaijan", utcOffset: 4, lang: "az,en" },
   { code: "am", name: "Armenia", utcOffset: 4, lang: "hy,en" },
   { code: "ge", name: "Georgia", utcOffset: 4, lang: "ka,en" },
   { code: "pg", name: "Papua New Guinea", utcOffset: 10, lang: "en" },
-  { code: "kh", name: "Cambodia", utcOffset: 7, lang: "kh,en" },
+  { code: "kh", name: "Cambodia", utcOffset: 7, lang: "km,en" }, // km = Khmer; "kh" was the country code
   { code: "la", name: "Laos", utcOffset: 7, lang: "en" },
   { code: "al", name: "Albania", utcOffset: 1, lang: "en,sq" },
   { code: "rs", name: "Serbia", utcOffset: 1, lang: "sr,en" },
@@ -207,18 +206,31 @@ const ISO_TO_NEWSDATA_LANG: Record<string, string> = {
   "uk": "ukrainian", "no": "norwegian", "hi": "hindi",
 };
 
-// NewsData.io `language` (ISO 639-1) codes we filter on. Low-priority countries
-// already carry their primary language as a 2-letter code (see LOW_PRIORITY_COUNTRIES),
-// so fetchHeadlines passes it straight through - but only when it's in this allowlist
-// of codes NewsData actually supports. A country whose code is absent (or an invalid
-// stray like "kz"/"kh") omits the language parameter and falls back to the country
-// filter alone, rather than risking a 422 UnsupportedLanguage.
+// ISO 639-1 codes that NewsData accepts as a `language` filter AND Azure can
+// translate. newsDataLanguages drops any other code rather than send it: a
+// rejected code is a terminal 422 that would freeze the country on old data.
+// bm (Bambara) and tg (Tajik) are left out on purpose - NewsData accepts them
+// but Azure cannot translate them.
 const NEWSDATA_SUPPORTED_LANGS = new Set<string>([
   "en", "es", "it", "de", "fr", "pt", "ru", "el", "nl", "ja", "zh", "sv", "ar",
   "ro", "he", "uk", "no", "hi", "tr", "ko", "th", "id", "ms", "pl", "cs", "hu",
   "bg", "vi", "bn", "fa", "hr", "da", "et", "lv", "lt", "sk", "sl", "sq", "sr",
   "bs", "mk", "my", "hy", "az", "ne", "ur", "fi", "mn", "ka", "km", "lo", "uz",
+  "be", "ku", "ps", "sw", "ha", "tk", "is", "kk",
 ]);
+const NEWSDATA_MAX_LANGS = 5; // NewsData's per-query limit
+
+// A country's `lang` list -> the supported codes to filter on, in the country's
+// own order, capped at NEWSDATA_MAX_LANGS. An empty result means no `language`
+// parameter is sent.
+export function newsDataLanguages(lang: string | undefined): string[] {
+  if (!lang) return [];
+  return lang
+    .split(",")
+    .map((code) => code.trim())
+    .filter((code) => NEWSDATA_SUPPORTED_LANGS.has(code))
+    .slice(0, NEWSDATA_MAX_LANGS);
+}
 export const FETCH_TIMEOUT_MS = 60000; // abort any single external request that hangs, so one stuck connection can't stall the whole tick
 export const HF_MAX_RETRIES = 2; // retries on HF 503 (model loading) / 429 / transient network errors before nulling a batch
 export const HF_BACKOFF_BASE_MS = 6000; // first backoff when no Retry-After / estimated_time is present
@@ -344,13 +356,24 @@ async function fetchWithRetry(
   return { res, status: null, attempts };
 }
 
+// The NewsData `latest` query for one country, without the API key.
+//
+// No `sort=source`: NewsData's `country` filter matches the publisher's
+// registered countries, and big outlets are registered for whole regions, so
+// source sorting served the same articles to many neighbouring countries.
+// Results come back newest first instead.
+export function newsDataQuery(country: Pick<FetchTarget, "code" | "lang">): string {
+  const langs = newsDataLanguages(country.lang);
+  const langParam = langs.length ? `&language=${langs.join(",")}` : "";
+  return `country=${country.code.toLowerCase()}${langParam}&removeduplicate=1&size=5`;
+}
+
 // Returns { articles, status, latencyMs, attempts } - `status` is a coarse outcome
 // label (ok | empty | unsupported | rate_limited | http_<code> | timeout |
 // network_error | invalid_json | api_error) the caller folds into the run summary.
 async function fetchHeadlines(country: FetchTarget): Promise<FetchOutcome> {
-  const { code: countryCode, lang } = country;
-  const langParam = lang && NEWSDATA_SUPPORTED_LANGS.has(lang) ? `&language=${lang}` : "";
-  const url = `https://newsdata.io/api/1/latest?country=${countryCode.toLowerCase()}${langParam}&sort=source&removeduplicate=1&size=5&apikey=${process.env.NEWSDATA_API_KEY}`;
+  const { code: countryCode } = country;
+  const url = `https://newsdata.io/api/1/latest?${newsDataQuery(country)}&apikey=${process.env.NEWSDATA_API_KEY}`;
   const start = now();
   const { res, status: earlyStatus, attempts } = await fetchWithRetry(url, {
     tag: "NewsData", code: countryCode,
