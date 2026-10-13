@@ -1,8 +1,9 @@
 // api/health.ts - Vercel Serverless Function (read-only)
 // Answers "is the pipeline alive?" from what the rolling cron leaves in Redis:
-// the last tick summary, each provider's credit usage today, and how many
-// countries have fallen behind their refresh cadence. Public and unauthenticated
-// on purpose - none of it is sensitive.
+// the last tick summary, each provider's credit usage today, how many countries
+// have fallen behind their refresh cadence, and how much of the map is serving
+// another country's articles. Public and unauthenticated on purpose - none of it
+// is sensitive.
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import {
@@ -18,6 +19,7 @@ import {
 } from "./_lib/refresh-core.js";
 import { COUNTRIES, HIGH_PRIORITY_CODES } from "./_lib/sentiment-fetch.js";
 import { parseTickSummary } from "../shared/types.js";
+import type { TickSummary } from "../shared/types.js";
 import { err } from "./_lib/logger.js";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -31,6 +33,8 @@ const DEGRADED_MAX_AGE_MS = 6 * HOUR_MS;
 // can't leave this check measuring the old one.
 const HIGH_PRIORITY_STALE_MS = 2 * 24 * HOUR_MS;
 const LOW_PRIORITY_STALE_MS = 2 * LOW_PRIORITY_DAYS * 24 * HOUR_MS;
+// How many recent ticks to search for article-overlap numbers.
+const OVERLAP_LOOKBACK_TICKS = 10;
 
 const toInt = (v: unknown): number => {
   const n = Number(v);
@@ -53,7 +57,8 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     const { Redis } = await import("@upstash/redis");
     const redis = new Redis({ url: redisUrl, token: redisToken });
     [ticks, freshPairs, ndUsed, gnUsed] = await Promise.all([
-      redis.lrange(TICKS_KEY, 0, 0), // newest tick only
+      // The newest tick drives status; the rest are only searched for overlap.
+      redis.lrange(TICKS_KEY, 0, OVERLAP_LOOKBACK_TICKS - 1),
       redis.zrange(FRESH_KEY, 0, -1, { withScores: true }),
       redis.get(ND_CREDIT_DAY_KEY(dayId(now))),
       redis.get(GN_CREDIT_DAY_KEY(gnDayId(now))),
@@ -67,6 +72,14 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
   }
 
   const lastTick = parseTickSummary(ticks?.[0]);
+  // Failed ticks have no overlap numbers, so use the newest tick that does.
+  const withOverlap = (ticks ?? [])
+    .map(parseTickSummary)
+    .find((t): t is TickSummary & { dupSets: number; sharedFeed: number } =>
+      t !== null && t.dupSets !== undefined && t.sharedFeed !== undefined);
+  const overlap = withOverlap
+    ? { dupSets: withOverlap.dupSets, sharedFeed: withOverlap.sharedFeed, asOf: withOverlap.ts }
+    : null;
   const ageMs = lastTick ? now.getTime() - new Date(lastTick.ts).getTime() : null;
   const minutesSinceLastTick = ageMs === null ? null : Math.max(0, Math.floor(ageMs / 60000));
 
@@ -108,5 +121,6 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
       newsdata: { used: toInt(ndUsed), limit: NEWSDATA_MAX_PER_DAY },
     },
     staleCountries: { count: staleCount, of: COUNTRIES.length },
+    overlap,
   });
 }

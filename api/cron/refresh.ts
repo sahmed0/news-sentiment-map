@@ -93,7 +93,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (subset.length === 0) {
       // Nothing due and no budget/backfill - still rebuild so a freshly-warmed
       // country key is reflected, then exit cheaply.
-      const count = await rebuildAggregate(redis);
+      const { count, dupSets, sharedFeed } = await rebuildAggregate(redis);
       // No fresh points, but the call still slides the window and lets the daily
       // rebuild heal on a quiet tick.
       const worldHistory = await safeWorldHistory([], selection.dayId);
@@ -112,6 +112,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ndUsedDay: 0,
         refunded: 0,
         ms: since(t0),
+        dupSets,
+        sharedFeed,
       });
       return res.status(200).json({ ok: true, refreshed: [], aggregate: count, debug: { reason, selection: diag, worldHistory } });
     }
@@ -133,7 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const refunded = refundCounts(results);
     await releaseCredits(redis, refunded, selection);
     const refreshed = await persistCountries(redis, results, selection.dayId);
-    const aggregate = await rebuildAggregate(redis);
+    const { count: aggregate, dupSets, sharedFeed } = await rebuildAggregate(redis);
 
     // Only countries that actually produced a score this tick feed the patch;
     // the rest keep their realigned prior values.
@@ -162,6 +164,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ndUsedDay: diag.ndUsedDay,
       refunded: refunded.newsdata + refunded.gnews,
       ms: since(t0),
+      dupSets,
+      sharedFeed,
     });
     return res.status(200).json({
       ok: true,

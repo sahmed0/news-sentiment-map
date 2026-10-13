@@ -21,6 +21,7 @@
 // one API's usage can never throttle the other.
 
 import { COUNTRIES, HIGH_PRIORITY_CODES, LOW_PRIORITY_COUNTRIES } from "./sentiment-fetch.js";
+import { log } from "./logger.js";
 import { parseCountryResult, parseHistoryPoint, parseWorldHistory } from "../../shared/types.js";
 import type { CountryDef, CountryResult, ProviderCounts, RedisLike, Selection, TickSummary, WorldHistory } from "../../shared/types.js";
 
@@ -50,7 +51,7 @@ export const WORLD_HISTORY_WINDOW_DAYS = 30;
 export const WORLD_HISTORY_REBUILD_HOUR = 4;
 export const TICKS_KEY = "sentiment:ticks";
 // ~4 days of hourly ticks - enough to eyeball a pattern of failures without the
-// list growing forever. Only the newest is served today (see api/health.ts).
+// list growing forever. api/health.ts reads the newest few (see OVERLAP_LOOKBACK_TICKS).
 export const TICKS_MAX = 100;
 
 // NewsData free tier: 200 credits / day. Stay a margin under it. NEWSDATA_MAX_PER_TICK
@@ -410,10 +411,42 @@ export async function persistCountries(redis: RedisLike, results: readonly Persi
   return refreshed;
 }
 
+// How much of the aggregate is one country's news being served as another's.
+//   dupSets    countries whose article-URL set is identical to another country's.
+//   sharedFeed countries where at least SHARED_FEED_MIN of their article URLs
+//              also appear in another country's set; catches partial sharing.
+// Neither needs to be 0: neighbours can legitimately carry the same wire story.
+export const SHARED_FEED_MIN = 0.5;
+export function measureArticleOverlap(
+  data: readonly { code: string; articles?: ReadonlyArray<{ url?: string | null }> }[],
+): { dupSets: number; sharedFeed: number } {
+  // A country with no URLs contributes to neither number.
+  const sets = data
+    .map((c) => ({ code: c.code, urls: new Set((c.articles ?? []).map((a) => a.url).filter((u): u is string => !!u)) }))
+    .filter((c) => c.urls.size > 0);
+
+  const bySet = new Map<string, number>();
+  const owners = new Map<string, number>(); // url -> how many countries serve it
+  for (const { urls } of sets) {
+    const key = [...urls].sort().join("\n");
+    bySet.set(key, (bySet.get(key) ?? 0) + 1);
+    for (const u of urls) owners.set(u, (owners.get(u) ?? 0) + 1);
+  }
+
+  let dupSets = 0;
+  for (const n of bySet.values()) if (n > 1) dupSets += n;
+  const sharedFeed = sets.filter(({ urls }) => {
+    const shared = [...urls].filter((u) => (owners.get(u) ?? 0) > 1).length;
+    return shared / urls.size >= SHARED_FEED_MIN;
+  }).length;
+  return { dupSets, sharedFeed };
+}
+
 // Rebuild the served aggregate from the durable per-country keys. Idempotent and
 // race-free (reads all keys, writes one). Countries never fetched are simply
 // absent. No TTL - the map keeps serving last-good data through any outage.
-export async function rebuildAggregate(redis: RedisLike): Promise<number> {
+// Returns the country count and the overlap measures (reported via the tick summary).
+export async function rebuildAggregate(redis: RedisLike): Promise<{ count: number; dupSets: number; sharedFeed: number }> {
   const codes = COUNTRIES.map((c) => c.code);
   const values = await redis.mget(...codes.map(COUNTRY_KEY));
   const data: CountryResult[] = values
@@ -424,7 +457,9 @@ export async function rebuildAggregate(redis: RedisLike): Promise<number> {
       highPriority: HIGH_PRIORITY_CODES.has(c.code),
     }));
   await redis.set(AGG_KEY, data);
-  return data.length;
+  const { dupSets, sharedFeed } = measureArticleOverlap(data);
+  log("Tick", "aggregate", { dupSets, sharedFeed });
+  return { count: data.length, dupSets, sharedFeed };
 }
 
 // The WORLD_HISTORY_WINDOW_DAYS calendar dates ending at `day`, ascending.

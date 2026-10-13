@@ -79,6 +79,9 @@ export interface TickSummary {
   refunded: number;
   ms: number;
   error?: string; // present only for failed ticks
+  // Article-overlap measures (see measureArticleOverlap). Absent on failed and older ticks.
+  dupSets?: number;
+  sharedFeed?: number;
 }
 
 // Narrow unions the code has implicitly.
@@ -253,5 +256,8 @@ export function parseTickSummary(v: unknown): TickSummary | null {
     out[k] = Number(parsed[k]);
   }
   if (typeof parsed.error === "string") out.error = parsed.error;
+  // Optional, so kept out of the counters loop (which rejects a missing field).
+  if (Number.isFinite(parsed.dupSets)) out.dupSets = Number(parsed.dupSets);
+  if (Number.isFinite(parsed.sharedFeed)) out.sharedFeed = Number(parsed.sharedFeed);
   return out;
 }
