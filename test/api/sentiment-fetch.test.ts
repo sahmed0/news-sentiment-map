@@ -3,6 +3,9 @@ import {
   fetchCountries,
   parseRetryAfter,
   isRetryableNetworkError,
+  newsDataLanguages,
+  newsDataQuery,
+  LOW_PRIORITY_COUNTRIES,
 } from "../../api/_lib/sentiment-fetch.js";
 
 // ---- Response / fetch helpers -------------------------------------------------
@@ -143,6 +146,60 @@ describe("isRetryableNetworkError", () => {
   });
 });
 
+// ---- NewsData query builder --------------------------------------------------
+
+describe("newsDataQuery", () => {
+  const q = (lang: string | undefined, code = "xx") => newsDataQuery({ code, lang });
+
+  it("sends a single supported code as-is (Gambia)", () => {
+    expect(q("en", "gm")).toBe("country=gm&language=en&removeduplicate=1&size=5");
+  });
+
+  it("sends a multi-code list instead of dropping it (Algeria)", () => {
+    expect(q("ar,en,fr", "dz")).toBe("country=dz&language=ar,en,fr&removeduplicate=1&size=5");
+  });
+
+  it("keeps the corrected Khmer code (Cambodia)", () => {
+    expect(q("km,en", "kh")).toBe("country=kh&language=km,en&removeduplicate=1&size=5");
+  });
+
+  it("drops unsupported codes from a mixed list, keeping order", () => {
+    expect(q("bm,fr,en", "ml")).toBe("country=ml&language=fr,en&removeduplicate=1&size=5");
+    expect(q(" fr , zz ,en ")).toBe("country=xx&language=fr,en&removeduplicate=1&size=5");
+  });
+
+  it("leaves a country with no filterable local language on en alone (Tajikistan)", () => {
+    expect(q("tk,en", "tm")).toBe("country=tm&language=tk,en&removeduplicate=1&size=5");
+    expect(q("tg,en", "tj")).toBe("country=tj&language=en&removeduplicate=1&size=5");
+  });
+
+  it("omits the parameter when no code is supported, or there is no list", () => {
+    expect(q("zz,yy")).toBe("country=xx&removeduplicate=1&size=5");
+    expect(q("")).toBe("country=xx&removeduplicate=1&size=5");
+    expect(q(undefined)).toBe("country=xx&removeduplicate=1&size=5");
+  });
+
+  it("keeps a five-code list unchanged (Montenegro)", () => {
+    expect(q("en,sr,bs,sq,hr", "me")).toBe("country=me&language=en,sr,bs,sq,hr&removeduplicate=1&size=5");
+  });
+
+  it("keeps only the first five of six supported codes (NewsData's per-query limit)", () => {
+    expect(q("en,fr,es,pt,ar,ru")).toBe("country=xx&language=en,fr,es,pt,ar&removeduplicate=1&size=5");
+  });
+
+  it("never sorts by source (the cause of the duplicate article sets)", () => {
+    for (const c of LOW_PRIORITY_COUNTRIES) expect(newsDataQuery(c)).not.toContain("sort=");
+  });
+
+  it("gives every low-priority country a language filter of at most five codes", () => {
+    for (const c of LOW_PRIORITY_COUNTRIES) {
+      const langs = newsDataLanguages(c.lang);
+      expect(langs.length, c.code).toBeGreaterThan(0);
+      expect(langs.length, c.code).toBeLessThanOrEqual(5);
+    }
+  });
+});
+
 // ---- HTTP request validity & happy path --------------------------------------
 
 describe("fetchCountries - request construction & scoring", () => {
@@ -161,7 +218,7 @@ describe("fetchCountries - request construction & scoring", () => {
     // The country's 2-letter lang (a NewsData-supported code) is passed straight
     // through as the &language= filter.
     expect(newsCall[0]).toBe(
-      "https://newsdata.io/api/1/latest?country=ly&language=ar&sort=source&removeduplicate=1&size=5&apikey=test-news-key"
+      "https://newsdata.io/api/1/latest?country=ly&language=ar&removeduplicate=1&size=5&apikey=test-news-key"
     );
     // English headlines are scored by the English model on their original text;
     // the multilingual model and the translator are never called.
@@ -191,7 +248,7 @@ describe("fetchCountries - request construction & scoring", () => {
       news: newsOk([{ title: "Hi", link: "http://a", pubDate: null, language: "english" }]),
       hfEng: hfPositive,
     });
-    // "kz" is not a NewsData-supported code -> fall back to the country filter alone.
+    // "kz" is a country code, not a language code -> no language parameter.
     await fetchCountries([{ code: "kz", name: "Kazakhstan", lang: "kz" }]);
     const newsCall = fetchFn.mock.calls.find(([u]) => u.startsWith("https://newsdata.io/"))!;
     expect(newsCall[0]).not.toContain("language=");
