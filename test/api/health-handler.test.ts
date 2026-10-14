@@ -223,4 +223,46 @@ describe("GET /api/health", () => {
     expect(res.body).toEqual({ status: "down", error: "Data temporarily unavailable" });
     expect(res.headers["Cache-Control"]).toBe("no-store");
   });
+
+  it("serves the article-overlap numbers from the newest tick", async () => {
+    useRedis(seed({ ticks: [tick(HOUR, { dupSets: 4, sharedFeed: 9 }), tick(2 * HOUR, { dupSets: 60, sharedFeed: 80 })] }));
+    const res = mockRes();
+    await call(res);
+    expect(res.body.overlap).toEqual({
+      dupSets: 4,
+      sharedFeed: 9,
+      asOf: new Date(NOW.getTime() - HOUR).toISOString(),
+    });
+  });
+
+  it("falls back past a failed newest tick to the last tick that carries the overlap numbers", async () => {
+    const failed = tick(HOUR, { ok: 0, attempted: 0, error: "boom" });
+    const older = tick(3 * HOUR, { dupSets: 12, sharedFeed: 30 });
+    useRedis(seed({ ticks: [failed, tick(2 * HOUR), older] }));
+    const res = mockRes();
+    await call(res);
+    expect(res.body.lastTick.error).toBe("boom"); // lastTick is still the newest entry
+    expect(res.body.status).toBe("degraded");
+    expect(res.body.overlap).toEqual({
+      dupSets: 12,
+      sharedFeed: 30,
+      asOf: new Date(NOW.getTime() - 3 * HOUR).toISOString(),
+    });
+  });
+
+  it("reports overlap as null when no recent tick carries the numbers", async () => {
+    useRedis(seed({ ticks: [tick(HOUR), tick(2 * HOUR, { error: "boom" })] }));
+    const res = mockRes();
+    await call(res);
+    expect(res.body.status).toBe("ok");
+    expect(res.body.overlap).toBeNull();
+  });
+
+  it("looks back no further than ten ticks for the overlap numbers", async () => {
+    const plain = Array.from({ length: 10 }, (_, i) => tick((i + 1) * 60 * 1000));
+    useRedis(seed({ ticks: [...plain, tick(11 * 60 * 1000, { dupSets: 1, sharedFeed: 2 })] }));
+    const res = mockRes();
+    await call(res);
+    expect(res.body.overlap).toBeNull();
+  });
 });

@@ -140,7 +140,7 @@ describe("POST /api/cron/refresh - orchestration", () => {
     vi.mocked(refundCounts).mockReturnValue({ newsdata: 0, gnews: 0 });
     vi.mocked(releaseCredits).mockResolvedValue(undefined);
     vi.mocked(persistCountries).mockResolvedValue(["us"]);
-    vi.mocked(rebuildAggregate).mockResolvedValue(1);
+    vi.mocked(rebuildAggregate).mockResolvedValue({ count: 1, dupSets: 0, sharedFeed: 0 });
 
     const res = mockRes();
     await call(authedReq(), res);
@@ -161,7 +161,7 @@ describe("POST /api/cron/refresh - orchestration", () => {
   it("takes the idle branch (rebuild only) when nothing is due / budget exhausted", async () => {
     vi.mocked(Redis).mockImplementation(function () { return createFakeRedis() as any; });
     vi.mocked(selectDueCountries).mockResolvedValue({ subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 1, gnDayId: 2, diag: { budget: 0 } } as any);
-    vi.mocked(rebuildAggregate).mockResolvedValue(7);
+    vi.mocked(rebuildAggregate).mockResolvedValue({ count: 7, dupSets: 0, sharedFeed: 0 });
 
     const res = mockRes();
     await call(authedReq(), res);
@@ -185,7 +185,7 @@ describe("POST /api/cron/refresh - orchestration", () => {
     vi.mocked(fetchCountries).mockResolvedValue([] as any);
     vi.mocked(refundCounts).mockReturnValue({ newsdata: 3, gnews: 4 });
     vi.mocked(persistCountries).mockResolvedValue(["us"]);
-    vi.mocked(rebuildAggregate).mockResolvedValue(150);
+    vi.mocked(rebuildAggregate).mockResolvedValue({ count: 150, dupSets: 6, sharedFeed: 11 });
 
     await call(authedReq(), mockRes());
 
@@ -200,6 +200,8 @@ describe("POST /api/cron/refresh - orchestration", () => {
       gnUsedDay: 12,
       ndUsedDay: 34,
       refunded: 7, // both providers' refunds summed
+      dupSets: 6,
+      sharedFeed: 11,
     });
     expect(typeof summary.ms).toBe("number");
     expect(new Date(summary.ts).toISOString()).toBe(summary.ts);
@@ -211,7 +213,7 @@ describe("POST /api/cron/refresh - orchestration", () => {
   it("records a zeroed summary for an idle tick", async () => {
     vi.mocked(Redis).mockImplementation(function () { return createFakeRedis() as any; });
     vi.mocked(selectDueCountries).mockResolvedValue({ subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 1, gnDayId: 2, diag: { budget: 0 } } as any);
-    vi.mocked(rebuildAggregate).mockResolvedValue(7);
+    vi.mocked(rebuildAggregate).mockResolvedValue({ count: 7, dupSets: 2, sharedFeed: 3 });
 
     await call(authedReq(), mockRes());
 
@@ -222,6 +224,8 @@ describe("POST /api/cron/refresh - orchestration", () => {
       tzDue: 0,
       backfill: 0,
       refunded: 0,
+      dupSets: 2,
+      sharedFeed: 3,
     });
   });
 
@@ -231,14 +235,18 @@ describe("POST /api/cron/refresh - orchestration", () => {
 
     await call(authedReq(), mockRes());
 
-    expect(vi.mocked(recordTick).mock.calls[0][1]).toMatchObject({ ok: 0, attempted: 0, aggregate: 0, error: "upstream down" });
+    const summary = vi.mocked(recordTick).mock.calls[0][1];
+    expect(summary).toMatchObject({ ok: 0, attempted: 0, aggregate: 0, error: "upstream down" });
+    // No aggregate rebuild on this path, so no overlap numbers (not zeros).
+    expect(summary).not.toHaveProperty("dupSets");
+    expect(summary).not.toHaveProperty("sharedFeed");
   });
 
   it("still returns 200 when recording the summary fails", async () => {
     const redis = createFakeRedis();
     vi.mocked(Redis).mockImplementation(function () { return redis as any; });
     vi.mocked(selectDueCountries).mockResolvedValue({ subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 1, gnDayId: 2, diag: { budget: 0 } } as any);
-    vi.mocked(rebuildAggregate).mockResolvedValue(7);
+    vi.mocked(rebuildAggregate).mockResolvedValue({ count: 7, dupSets: 0, sharedFeed: 0 });
     vi.mocked(recordTick).mockRejectedValue(new Error("ticks key gone"));
 
     const res = mockRes();
@@ -265,7 +273,7 @@ describe("POST /api/cron/refresh - orchestration", () => {
     ] as any);
     vi.mocked(refundCounts).mockReturnValue({ newsdata: 0, gnews: 0 });
     vi.mocked(persistCountries).mockResolvedValue(["us"]);
-    vi.mocked(rebuildAggregate).mockResolvedValue(2);
+    vi.mocked(rebuildAggregate).mockResolvedValue({ count: 2, dupSets: 0, sharedFeed: 0 });
     vi.mocked(refreshWorldHistory).mockResolvedValue("patched");
 
     const res = mockRes();
@@ -278,7 +286,7 @@ describe("POST /api/cron/refresh - orchestration", () => {
   it("maintains world history on the idle path with an empty points array", async () => {
     vi.mocked(Redis).mockImplementation(function () { return createFakeRedis() as any; });
     vi.mocked(selectDueCountries).mockResolvedValue({ subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 9, gnDayId: 10, diag: { budget: 0 } } as any);
-    vi.mocked(rebuildAggregate).mockResolvedValue(7);
+    vi.mocked(rebuildAggregate).mockResolvedValue({ count: 7, dupSets: 0, sharedFeed: 0 });
     vi.mocked(refreshWorldHistory).mockResolvedValue("rebuilt");
 
     const res = mockRes();
@@ -301,7 +309,7 @@ describe("POST /api/cron/refresh - orchestration", () => {
     vi.mocked(fetchCountries).mockResolvedValue([{ code: "us", score: 0.4, articles: [{ title: "a", score: 0.4 }] }] as any);
     vi.mocked(refundCounts).mockReturnValue({ newsdata: 0, gnews: 0 });
     vi.mocked(persistCountries).mockResolvedValue(["us"]);
-    vi.mocked(rebuildAggregate).mockResolvedValue(1);
+    vi.mocked(rebuildAggregate).mockResolvedValue({ count: 1, dupSets: 0, sharedFeed: 0 });
     vi.mocked(refreshWorldHistory).mockRejectedValue(new Error("world history boom"));
 
     const res = mockRes();

@@ -19,9 +19,12 @@ import {
   recordTick,
   TICKS_KEY,
   TICKS_MAX,
+  measureArticleOverlap,
+  SHARED_FEED_MIN,
 } from "../../api/_lib/refresh-core.js";
 import { COUNTRIES, HIGH_PRIORITY_CODES } from "../../api/_lib/sentiment-fetch.js";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
+import { parseTickSummary } from "../../shared/types.js";
 import type { CountryResult, TickSummary } from "../../shared/types.js";
 
 const dayIdOf = (now: Date) => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
@@ -421,10 +424,110 @@ describe("rebuildAggregate", () => {
         "sentiment:country:gb": { code: "gb", score: -0.1 },
       },
     });
-    const count = await rebuildAggregate(redis);
+    const { count } = await rebuildAggregate(redis);
     expect(count).toBe(2);
     const agg = redis._store.get(AGG_KEY) as CountryResult[];
     expect(agg).toHaveLength(2);
     expect(agg.map((c) => c.code).sort()).toEqual(["gb", "us"]);
+  });
+
+  it("returns the article-overlap measures of the aggregate it wrote", async () => {
+    const withUrls = (code: string, urls: string[]) => ({
+      code,
+      name: code,
+      score: 0,
+      fetchedAt: "2024-06-01T00:00:00Z",
+      articles: urls.map((url) => ({ title: url, url, publishedAt: null, language: "english", score: 0, translatedTitle: null })),
+    });
+    const redis = createFakeRedis({
+      store: {
+        // zm and mw: an identical set. ly: 3 of its 5 shared with zm. us: its own news.
+        "sentiment:country:zm": withUrls("zm", ["a", "b", "c", "d", "e"]),
+        "sentiment:country:mw": withUrls("mw", ["e", "d", "c", "b", "a"]),
+        "sentiment:country:ly": withUrls("ly", ["a", "b", "c", "x", "y"]),
+        "sentiment:country:us": withUrls("us", ["u1", "u2"]),
+      },
+    });
+    expect(await rebuildAggregate(redis)).toEqual({ count: 4, dupSets: 2, sharedFeed: 3 });
+  });
+});
+
+describe("measureArticleOverlap", () => {
+  const c = (code: string, urls: (string | null)[]) => ({ code, articles: urls.map((url) => ({ url })) });
+  const five = (p: string) => [1, 2, 3, 4, 5].map((i) => `${p}${i}`);
+
+  it("counts nothing when every country has its own articles", () => {
+    expect(measureArticleOverlap([c("a", five("a")), c("b", five("b"))])).toEqual({ dupSets: 0, sharedFeed: 0 });
+  });
+
+  it("counts both members of one identical pair, regardless of URL order", () => {
+    const urls = five("x");
+    expect(measureArticleOverlap([c("a", urls), c("b", [...urls].reverse()), c("z", five("z"))]))
+      .toEqual({ dupSets: 2, sharedFeed: 2 });
+  });
+
+  it("counts all six members of one cluster of six", () => {
+    const data = ["a", "b", "c", "d", "e", "f"].map((code) => c(code, five("x")));
+    expect(measureArticleOverlap(data)).toEqual({ dupSets: 6, sharedFeed: 6 });
+  });
+
+  it("adds up two separate clusters", () => {
+    const data = [c("a", five("x")), c("b", five("x")), c("c", five("y")), c("d", five("y")), c("e", five("y"))];
+    expect(measureArticleOverlap(data)).toEqual({ dupSets: 5, sharedFeed: 5 });
+  });
+
+  it("ignores countries with no articles, or only null/empty URLs", () => {
+    const data = [c("a", []), c("b", []), c("n1", [null, ""]), c("n2", [null, ""]), { code: "u" }];
+    expect(measureArticleOverlap(data)).toEqual({ dupSets: 0, sharedFeed: 0 });
+  });
+
+  it("ignores null URLs inside an otherwise identical set", () => {
+    expect(measureArticleOverlap([c("a", ["p", "q", null]), c("b", ["q", "p"])])).toEqual({ dupSets: 2, sharedFeed: 2 });
+  });
+
+  it("counts a country sharing 3 of 5 URLs in sharedFeed but not dupSets", () => {
+    const data = [c("a", ["s1", "s2", "s3", "a4", "a5"]), c("b", ["s1", "s2", "s3", "b4", "b5"])];
+    expect(measureArticleOverlap(data)).toEqual({ dupSets: 0, sharedFeed: 2 });
+  });
+
+  it("counts a country sharing only 1 of 5 in neither (below SHARED_FEED_MIN)", () => {
+    const data = [c("a", ["s1", "a2", "a3", "a4", "a5"]), c("b", ["s1", "b2", "b3", "b4", "b5"])];
+    expect(SHARED_FEED_MIN).toBe(0.5);
+    expect(measureArticleOverlap(data)).toEqual({ dupSets: 0, sharedFeed: 0 });
+  });
+
+  it("counts exactly half (2 of 4) as a shared feed - the threshold is inclusive", () => {
+    const data = [c("a", ["s1", "s2", "a3", "a4"]), c("b", ["s1", "b2", "b3", "s2", "b5", "b6"])];
+    // a: 2/4 shared -> counted. b: 2/6 shared -> not.
+    expect(measureArticleOverlap(data)).toEqual({ dupSets: 0, sharedFeed: 1 });
+  });
+
+  it("counts a URL shared across several different countries", () => {
+    const data = [c("a", ["s1", "s2", "a3"]), c("b", ["s1", "b2", "b3"]), c("d", ["s2", "d2", "d3"])];
+    expect(measureArticleOverlap(data)).toEqual({ dupSets: 0, sharedFeed: 1 });
+  });
+});
+
+describe("parseTickSummary", () => {
+  const base = {
+    ts: "2024-06-01T12:00:00.000Z", ok: 1, attempted: 2, aggregate: 150, tzDue: 1,
+    backfill: 1, gnUsedDay: 3, ndUsedDay: 4, refunded: 0, ms: 900,
+  };
+
+  it("still parses a stored summary that predates the overlap fields", () => {
+    const parsed = parseTickSummary(JSON.stringify(base));
+    expect(parsed).toEqual(base);
+    expect(parsed).not.toHaveProperty("dupSets");
+    expect(parsed).not.toHaveProperty("sharedFeed");
+  });
+
+  it("reads dupSets and sharedFeed when present, as a string or an object", () => {
+    const withOverlap = { ...base, dupSets: 6, sharedFeed: 11 };
+    expect(parseTickSummary(JSON.stringify(withOverlap))).toEqual(withOverlap);
+    expect(parseTickSummary(withOverlap)).toEqual(withOverlap);
+  });
+
+  it("drops a non-numeric overlap field without rejecting the tick", () => {
+    expect(parseTickSummary({ ...base, dupSets: "lots", sharedFeed: null })).toEqual(base);
   });
 });
