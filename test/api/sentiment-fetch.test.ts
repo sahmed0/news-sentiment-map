@@ -187,6 +187,18 @@ describe("newsDataQuery", () => {
     expect(q("en,fr,es,pt,ar,ru")).toBe("country=xx&language=en,fr,es,pt,ar&removeduplicate=1&size=5");
   });
 
+  it("sends no en for the countries that dropped it to break a duplicate cluster", () => {
+    const byCode = new Map(LOW_PRIORITY_COUNTRIES.map((c) => [c.code, c]));
+    const query = (code: string): string => {
+      const c = byCode.get(code);
+      if (!c) throw new Error(`${code} missing`);
+      return newsDataQuery(c);
+    };
+    expect(query("kp")).toBe("country=kp&language=ko&removeduplicate=1&size=5");
+    expect(query("mg")).toBe("country=mg&language=fr&removeduplicate=1&size=5");
+    expect(query("gq")).toBe("country=gq&language=es,fr,pt&removeduplicate=1&size=5");
+  });
+
   it("never sorts by source (the cause of the duplicate article sets)", () => {
     for (const c of LOW_PRIORITY_COUNTRIES) expect(newsDataQuery(c)).not.toContain("sort=");
   });

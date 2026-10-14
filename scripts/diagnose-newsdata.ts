@@ -4,6 +4,7 @@
 //   pnpm exec tsx scripts/diagnose-newsdata.ts --step0-only    validate language codes only
 //   pnpm exec tsx scripts/diagnose-newsdata.ts --out raw.json  also dump every raw response
 //   ... --skip-step0 --already-spent N   skip Step 0; N calls already spent count against MAX_CALLS
+//   ... --en-drop                        compare EN_DROP_GROUP with and without `en`
 //
 // Compares NewsData query variants for pairs of countries that share articles:
 //   Step 0  check every language code production sends is accepted
@@ -15,7 +16,7 @@
 // the cron's ledger, so it checks /api/health for headroom and caps at MAX_CALLS.
 
 import { writeFileSync } from "node:fs";
-import { LOW_PRIORITY_COUNTRIES, newsDataLanguages } from "../api/_lib/sentiment-fetch.js";
+import { LOW_PRIORITY_COUNTRIES, newsDataLanguages, newsDataQuery } from "../api/_lib/sentiment-fetch.js";
 
 const MAX_CALLS = 50;
 const GAP_MS = 2000; // NewsData's free tier allows ~1 request per second
@@ -42,6 +43,16 @@ const MENTIONS: Record<string, string[]> = {
   al: ["albania", "shqipëri", "shqiperi", "tirana"],
   ao: ["angola", "luanda"],
   ci: ["ivory coast", "côte d'ivoire", "cote d'ivoire", "ivoir", "abidjan"],
+  kp: ["north korea", "dprk", "pyongyang", "kim jong", "북한", "조선", "평양"],
+  bt: ["bhutan", "thimphu"],
+  af: ["afghan", "kabul", "taliban", "افغانستان", "کابل"],
+  sl: ["sierra leone", "freetown"],
+  ls: ["lesotho", "maseru"],
+  cf: ["central african", "centrafrique", "centrafricain", "bangui"],
+  ml: ["mali", "bamako"],
+  mg: ["madagascar", "malgache", "antananarivo"],
+  er: ["eritrea", "érythrée", "erythree", "asmara", "إريتريا"],
+  gq: ["equatorial guinea", "guinea ecuatorial", "guinée équatoriale", "malabo"],
 };
 
 const args = process.argv.slice(2);
@@ -49,6 +60,7 @@ const step0Only = args.includes("--step0-only");
 const outIdx = args.indexOf("--out");
 const outPath = outIdx >= 0 ? args[outIdx + 1] : null;
 const skipStep0 = args.includes("--skip-step0");
+const enDrop = args.includes("--en-drop");
 const spentIdx = args.indexOf("--already-spent");
 const alreadySpent = spentIdx >= 0 ? Number(args[spentIdx + 1]) : 0;
 if (!Number.isInteger(alreadySpent) || alreadySpent < 0) {
@@ -274,11 +286,70 @@ function step1(responses: NdResponse[]): void {
   }
 }
 
+// --en-drop
+
+// Countries that still shared articles after the query fix. Each is queried as
+// production queries it, then again with `en` removed. English-only countries
+// (sl, ls, bt) are measured but have no en-dropped variant.
+const EN_DROP_GROUP = ["kp", "bt", "af", "sl", "ls", "cf", "ml", "mg", "er", "gq"];
+
+async function enDropStep(): Promise<void> {
+  const byCode = new Map(LOW_PRIORITY_COUNTRIES.map((c) => [c.code, c]));
+  const current = new Map<string, Set<string>>();
+  const dropped = new Map<string, Set<string>>();
+
+  const run = async (label: string, code: string, query: string): Promise<Set<string>> => {
+    const r = await nd(query);
+    const about = r.articles.filter((a) => mentions(code, a)).length;
+    const langs = [...new Set(r.articles.map((a) => a.language))].join(",");
+    console.log(`  ${label} ${code}  ${r.query}`);
+    console.log(`     HTTP ${r.status}, ${r.articles.length} articles, ${about} mention the country, languages: ${langs}${r.body ? `  body: ${r.body.slice(0, 300)}` : ""}`);
+    for (const a of r.articles) console.log(`     ${mentions(code, a) ? "*" : " "} [${a.language}] ${host(a.link)}  ${(a.title ?? "").slice(0, 90)}`);
+    return new Set(r.articles.map((a) => a.link).filter((u): u is string => !!u));
+  };
+
+  console.log("\n== --en-drop: production query ==");
+  for (const code of EN_DROP_GROUP) {
+    const def = byCode.get(code);
+    if (!def) throw new Error(`${code} is not a low-priority country`);
+    current.set(code, await run("prod", code, newsDataQuery(def)));
+  }
+
+  console.log("\n== --en-drop: production query with en removed ==");
+  for (const code of EN_DROP_GROUP) {
+    const def = byCode.get(code);
+    if (!def) throw new Error(`${code} is not a low-priority country`);
+    const withoutEn = newsDataLanguages(def.lang).filter((l) => l !== "en");
+    if (!withoutEn.length) continue; // English-only: dropping en would drop the filter
+    dropped.set(code, await run("no-en", code, newsDataQuery({ code, lang: withoutEn.join(",") })));
+  }
+
+  // Overlap of every pair in the group, first with everyone on production, then
+  // with every candidate switched to its en-dropped set.
+  const matrix = (title: string, sets: Map<string, Set<string>>): void => {
+    console.log(`\n== Jaccard, ${title} (pairs above 0) ==`);
+    for (const code of EN_DROP_GROUP) {
+      const mine = sets.get(code) ?? new Set<string>();
+      const cells = EN_DROP_GROUP.filter((o) => o !== code)
+        .map((o) => [o, jaccard(mine, sets.get(o) ?? new Set())] as const)
+        .filter(([, j]) => j > 0)
+        .map(([o, j]) => `${o} ${j.toFixed(2)}`);
+      console.log(`  ${code} (${mine.size} urls): ${cells.length ? cells.join("  ") : "none"}`);
+    }
+  };
+  matrix("everyone on production", current);
+  matrix("candidates without en", new Map([...current, ...dropped]));
+}
+
 // main
 
 async function main(): Promise<void> {
   await checkHeadroom();
   try {
+    if (enDrop) {
+      await enDropStep();
+      return;
+    }
     const rejected = skipStep0 ? [] : await step0();
     if (rejected.length) {
       console.log("\nA code was rejected: remove it from NEWSDATA_SUPPORTED_LANGS before running the variants.");

@@ -116,7 +116,7 @@ export const LOW_PRIORITY_COUNTRIES: readonly CountryDef[] = [
   { code: "uz", name: "Uzbekistan", utcOffset: 5, lang: "uz,en" },
   { code: "cm", name: "Cameroon", utcOffset: 1, lang: "fr,en" },
   { code: "mn", name: "Mongolia", utcOffset: 8, lang: "mn,en" },
-  { code: "kp", name: "North Korea", utcOffset: 9, lang: "ko,en" },
+  { code: "kp", name: "North Korea", utcOffset: 9, lang: "ko" }, // no en: it shared Bhutan's English wire stories
   { code: "ml", name: "Mali", utcOffset: 0, lang: "bm,fr,en" }, // bm (Bambara) is dropped: Azure cannot translate it (see NEWSDATA_SUPPORTED_LANGS)
   { code: "td", name: "Chad", utcOffset: 1, lang: "fr,ar,en" },
   { code: "mr", name: "Mauritania", utcOffset: 0, lang: "ar,en" },
@@ -127,7 +127,7 @@ export const LOW_PRIORITY_COUNTRIES: readonly CountryDef[] = [
   { code: "gn", name: "Guinea", utcOffset: 0, lang: "fr,en" },
   { code: "ci", name: "Ivory Coast", utcOffset: 0, lang: "fr,en" },
   { code: "bf", name: "Burkina Faso", utcOffset: 0, lang: "fr,en" },
-  { code: "mg", name: "Madagascar", utcOffset: 3, lang: "fr,en" },
+  { code: "mg", name: "Madagascar", utcOffset: 3, lang: "fr" }, // no en: its English results duplicated other countries'
   { code: "tm", name: "Turkmenistan", utcOffset: 5, lang: "tk,en" },
   { code: "kg", name: "Kyrgyzstan", utcOffset: 5, lang: "ru,en" },
   { code: "tj", name: "Tajikistan", utcOffset: 5, lang: "tg,en" }, // tg (Tajik) is dropped: Azure cannot translate it, so this sends "en" alone
@@ -169,7 +169,7 @@ export const LOW_PRIORITY_COUNTRIES: readonly CountryDef[] = [
   { code: "sl", name: "Sierra Leone", utcOffset: 0, lang: "en" },
   { code: "gm", name: "Gambia", utcOffset: 0, lang: "en" },
   { code: "ls", name: "Lesotho", utcOffset: 2, lang: "en" },
-  { code: "gq", name: "Equatorial Guinea", utcOffset: 1, lang: "es,en,fr,pt" },
+  { code: "gq", name: "Equatorial Guinea", utcOffset: 1, lang: "es,fr,pt" }, // no en: its English results duplicated other countries'
   { code: "bz", name: "Belize", utcOffset: -6, lang: "en" },
   { code: "sv", name: "El Salvador", utcOffset: -6, lang: "es,en" },
   { code: "do", name: "Dominican Republic", utcOffset: -4, lang: "es,en,fr" },
@@ -223,6 +223,9 @@ const NEWSDATA_MAX_LANGS = 5; // NewsData's per-query limit
 // A country's `lang` list -> the supported codes to filter on, in the country's
 // own order, capped at NEWSDATA_MAX_LANGS. An empty result means no `language`
 // parameter is sent.
+//
+// English is where multi-country wires collide, so a few multi-language
+// countries (kp, mg, gq) leave `en` out of their list in the table.
 export function newsDataLanguages(lang: string | undefined): string[] {
   if (!lang) return [];
   return lang
