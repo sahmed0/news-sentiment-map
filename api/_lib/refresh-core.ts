@@ -14,6 +14,8 @@
 //                                HISTORY_MAX_DAYS (served by api/history.ts)
 //   sentiment:ticks           -> LIST of JSON TickSummary, newest first, capped at
 //                                TICKS_MAX: one entry per tick (served by api/health.ts)
+//   sentiment:scoring:down    -> ISO time the scorer was first seen down; present only
+//                                during an outage (see SCORING_DOWN_KEY)
 //
 // Headlines come from two providers with independent quotas, so the ledger is
 // split: high-priority countries are fetched from GNews, the rest from NewsData
@@ -53,6 +55,13 @@ export const TICKS_KEY = "sentiment:ticks";
 // ~4 days of hourly ticks - enough to eyeball a pattern of failures without the
 // list growing forever. api/health.ts reads the newest few (see OVERLAP_LOOKBACK_TICKS).
 export const TICKS_MAX = 100;
+// Scoring breaker. A tick whose scorer rejected every headline it was sent (an
+// HF outage, used-up inference credits, a revoked token) sets this; while it is
+// set, each tick probes the scorer with one headline before fetching anything,
+// so an outage costs one tick of provider credits rather than every credit of
+// every day it lasts. The first successful probe deletes it. No TTL: only a
+// working scorer may clear it. api/health.ts reads it too.
+export const SCORING_DOWN_KEY = "sentiment:scoring:down";
 
 // NewsData free tier: 200 credits / day. Stay a margin under it. NEWSDATA_MAX_PER_TICK
 // bounds the NewsData work in a single cron tick (each country is fetched + scored

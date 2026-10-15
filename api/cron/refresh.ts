@@ -6,8 +6,9 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { timingSafeEqual } from "node:crypto";
-import { fetchCountries } from "../_lib/sentiment-fetch.js";
+import { fetchCountries, probeScoring } from "../_lib/sentiment-fetch.js";
 import {
+  SCORING_DOWN_KEY,
   selectDueCountries,
   reserveCredits,
   releaseCredits,
@@ -119,6 +120,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: true, refreshed: [], aggregate: count, debug: { reason, selection: diag, worldHistory } });
     }
 
+    // Scoring breaker (see SCORING_DOWN_KEY)
+    const downSince = await redis.get<string>(SCORING_DOWN_KEY);
+    if (downSince) {
+      if (!(await probeScoring())) {
+        const { count, dupSets, sharedFeed } = await rebuildAggregate(redis);
+        warn("Tick", "scoring_down", { since: downSince, ms: since(t0) });
+        // Carries an error so /api/health degrades for as long as the outage lasts.
+        await safeRecord({
+          ts: new Date().toISOString(),
+          ok: 0,
+          attempted: 0,
+          aggregate: count,
+          tzDue: 0,
+          backfill: 0,
+          gnUsedDay: 0,
+          ndUsedDay: 0,
+          refunded: 0,
+          ms: since(t0),
+          error: `scoring unavailable since ${downSince}`,
+          dupSets,
+          sharedFeed,
+        });
+        // 200, not 5xx: the tick did what it should, and QStash must not retry it.
+        return res.status(200).json({ ok: false, reason: "scoring_unavailable", since: downSince, aggregate: count });
+      }
+      await redis.del(SCORING_DOWN_KEY);
+      log("Tick", "scoring_recovered", { since: downSince });
+    }
+
     // Reserve credits up front so a mid-tick crash can never under-count spend.
     // Each provider is charged its own count (see selection.counts).
     await reserveCredits(redis, selection.counts, selection);
@@ -131,6 +161,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     const stats: FetchStats = {};
     const results = await fetchCountries(subset, stats);
+    if (stats.scoringFailed) {
+      // nx keeps the time the outage was first seen if the flag is somehow still set.
+      await redis.set(SCORING_DOWN_KEY, new Date().toISOString(), { nx: true });
+      err("Tick", "scoring_failed", { headlines: stats.counts?.headlines });
+    }
     // Refund credits reserved for transient failures: they're retried next tick and
     // typically never consumed the provider's real quota, so reclaim the slack.
     const refunded = refundCounts(results);
@@ -165,6 +200,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ndUsedDay: diag.ndUsedDay,
       refunded: refunded.newsdata + refunded.gnews,
       ms: since(t0),
+      ...(stats.scoringFailed ? { error: "scoring failed for every headline" } : {}),
       dupSets,
       sharedFeed,
     });

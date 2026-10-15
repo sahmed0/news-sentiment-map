@@ -698,6 +698,24 @@ export async function scoreInChunks(modelUrl: string, inputs: string[]): Promise
   return scores;
 }
 
+// The scoring breaker's probe: one fixed English headline, so neither a news provider
+// nor translation is involved. Gives up after PROBE_TIMEOUT_MS, so a hung scorer
+// can't hold the tick for the full retry cycle.
+const PROBE_HEADLINE = "Markets rise after a strong jobs report";
+export const PROBE_TIMEOUT_MS = 30_000;
+export async function probeScoring(): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<null[]>((resolve) => {
+    timer = setTimeout(() => resolve([null]), PROBE_TIMEOUT_MS);
+  });
+  try {
+    const [score] = await Promise.race([batchSentimentModel(HF_ENGLISH_MODEL, [PROBE_HEADLINE]), timedOut]);
+    return typeof score === "number";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // A fetch target is a country to refresh. selectDueCountries yields full CountryDef
 // entries, but callers/tests may pass a partial ({ code, name }); the fetchers read
 // only `code` and (optionally) `lang`.
@@ -733,6 +751,9 @@ export interface FetchStats {
     scored: number;
     score: number | null;
   }>;
+  // True when every headline sent to the scorer came back unscored.
+  // Trips the cron's scoring breaker (see SCORING_DOWN_KEY).
+  scoringFailed?: boolean;
 }
 
 // A headline flattened out for scoring, carrying enough to write results back.
@@ -839,6 +860,9 @@ export async function fetchCountries(subset: FetchTarget[], stats: FetchStats = 
     ? await scoreInChunks(HF_ENGLISH_MODEL, inputs)
     : [];
   const scoreMs = since(tScore);
+  // Empty inputs (failed translations) aren't sent so they say nothing about the scorer.
+  const sentToScorer = inputs.filter((s) => s.length > 0).length;
+  const scoringFailed = sentToScorer > 0 && scores.every((s) => s === null);
 
   // Phase 4: write scores + English translations back onto each article (null until set)
   const articleScores = new Map<string, (number | null)[]>(fetched.map((c) => [c.code, c.articles.map(() => null)]));
@@ -906,6 +930,7 @@ export async function fetchCountries(subset: FetchTarget[], stats: FetchStats = 
     nullScores,
   };
   stats.countries = perCountry;
+  stats.scoringFailed = scoringFailed;
   log("Phase", "done", stats.timings);
 
   return results;
