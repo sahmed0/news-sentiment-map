@@ -7,6 +7,7 @@ import {
   GNEWS_MAX_PER_DAY,
   ND_CREDIT_DAY_KEY,
   NEWSDATA_MAX_PER_DAY,
+  SCORING_DOWN_KEY,
   TICKS_KEY,
   dayId,
   gnDayId,
@@ -81,13 +82,16 @@ const [HIGH2, LOW] = [
 const allFresh = (): Record<string, number> =>
   Object.fromEntries(COUNTRIES.map((c) => [c.code, NOW.getTime() - HOUR]));
 
-const seed = (opts: { ticks?: string[]; fresh?: Record<string, number>; nd?: number; gn?: number } = {}) =>
+const seed = (
+  opts: { ticks?: string[]; fresh?: Record<string, number>; nd?: number; gn?: number; scoringDown?: string } = {},
+) =>
   createFakeRedis({
     lists: opts.ticks ? { [TICKS_KEY]: opts.ticks } : {},
     zsets: { [FRESH_KEY]: opts.fresh ?? allFresh() },
     store: {
       ...(opts.nd === undefined ? {} : { [ND_CREDIT_DAY_KEY(dayId(NOW))]: opts.nd }),
       ...(opts.gn === undefined ? {} : { [GN_CREDIT_DAY_KEY(gnDayId(NOW))]: opts.gn }),
+      ...(opts.scoringDown === undefined ? {} : { [SCORING_DOWN_KEY]: opts.scoringDown }),
     },
   });
 const useRedis = (fake: unknown) =>
@@ -238,6 +242,23 @@ describe("GET /api/health", () => {
     const res = mockRes();
     await call(res);
     expect(res.body.status).toBe("ok");
+  });
+
+  it("degrades and says since when while the scorer is flagged down", async () => {
+    const since = new Date(NOW.getTime() - 3 * HOUR).toISOString();
+    useRedis(seed({ ticks: [tick(60_000)], scoringDown: since }));
+    const res = mockRes();
+    await call(res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.status).toBe("degraded");
+    expect(res.body.scoringDownSince).toBe(since);
+  });
+
+  it("reports scoringDownSince as null when the scorer is fine", async () => {
+    useRedis(seed({ ticks: [tick(60_000)] }));
+    const res = mockRes();
+    await call(res);
+    expect(res.body.scoringDownSince).toBeNull();
   });
 
   it("degrades to a 503 instead of throwing when Redis is unreachable", async () => {

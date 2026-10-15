@@ -1,9 +1,9 @@
 // api/health.ts - Vercel Serverless Function (read-only)
 // Answers "is the pipeline alive?" from what the rolling cron leaves in Redis:
 // the last tick summary, each provider's credit usage today, how many countries
-// have fallen behind their refresh cadence, and how much of the map is serving
-// another country's articles. Public and unauthenticated on purpose - none of it
-// is sensitive.
+// have fallen behind their refresh cadence, whether the scorer is down, and how
+// much of the map is serving another country's articles. Public and
+// unauthenticated on purpose - none of it is sensitive.
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import {
@@ -13,6 +13,7 @@ import {
   LOW_PRIORITY_DAYS,
   ND_CREDIT_DAY_KEY,
   NEWSDATA_MAX_PER_DAY,
+  SCORING_DOWN_KEY,
   TICKS_KEY,
   dayId,
   gnDayId,
@@ -58,15 +59,17 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
   let freshPairs: unknown[];
   let ndUsed: unknown;
   let gnUsed: unknown;
+  let scoringDown: unknown;
   try {
     const { Redis } = await import("@upstash/redis");
     const redis = new Redis({ url: redisUrl, token: redisToken });
-    [ticks, freshPairs, ndUsed, gnUsed] = await Promise.all([
+    [ticks, freshPairs, ndUsed, gnUsed, scoringDown] = await Promise.all([
       // The newest tick drives status; the rest are only searched for overlap.
       redis.lrange(TICKS_KEY, 0, OVERLAP_LOOKBACK_TICKS - 1),
       redis.zrange(FRESH_KEY, 0, -1, { withScores: true }),
       redis.get(ND_CREDIT_DAY_KEY(dayId(now))),
       redis.get(GN_CREDIT_DAY_KEY(gnDayId(now))),
+      redis.get(SCORING_DOWN_KEY),
     ]);
   } catch (e) {
     // If Redis is unreachable the pipeline is unobservable, which for a health
@@ -102,14 +105,17 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     return now.getTime() - last > limit;
   }).length;
 
+  const scoringDownSince = typeof scoringDown === "string" ? scoringDown : null;
+
   // A tick that ran but threw is as bad as a late one: the data didn't move. So
-  // is a map mostly past its refresh limits - on-time ticks that save nothing
-  // must not read as healthy.
+  // is a scorer outage, or a map mostly past its refresh limits - on-time ticks
+  // that save nothing must not read as healthy.
   const status =
     ageMs === null || ageMs > DEGRADED_MAX_AGE_MS
       ? "down"
       : ageMs > OK_MAX_AGE_MS ||
           (lastTick && lastTick.error) ||
+          scoringDownSince !== null ||
           staleCount > COUNTRIES.length * STALE_DEGRADED_SHARE
         ? "degraded"
         : "ok";
@@ -130,6 +136,7 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
       newsdata: { used: toInt(ndUsed), limit: NEWSDATA_MAX_PER_DAY },
     },
     staleCountries: { count: staleCount, of: COUNTRIES.length },
+    scoringDownSince,
     overlap,
   });
 }

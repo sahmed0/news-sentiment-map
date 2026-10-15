@@ -120,7 +120,7 @@ Full method, tables and limitations: [eval/RESULTS.md](eval/RESULTS.md).
 |---|---|---|
 | `GET /api/sentiment` | World aggregate - one entry per country with its headlines | `s-maxage=300, stale-while-revalidate=3600`; `503` while warming |
 | `GET /api/history?code=fr` | Last 30 daily scores for one country | `s-maxage=3600, stale-while-revalidate=86400`; `400` on unknown code |
-| `GET /api/health` | Pipeline status, last tick, provider budgets, stale-country count | `s-maxage=60`; `503` when no recent tick |
+| `GET /api/health` | Pipeline status, last tick, provider budgets, stale-country count, scorer outage (`scoringDownSince`), feed-overlap counts | `s-maxage=60`; `503` when no recent tick; `degraded` while the scorer is down or over a quarter of countries are stale |
 | `POST /api/cron/refresh` | The rolling refresh tick - the only writer | QStash only; `Bearer CRON_SECRET`, timing-safe |
 
 ## Stack
