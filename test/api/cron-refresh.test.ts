@@ -20,8 +20,9 @@ vi.mock("../../api/_lib/refresh-core.js", () => ({
 
 import handler from "../../api/cron/refresh.js";
 import { Redis } from "@upstash/redis";
-import { fetchCountries } from "../../api/_lib/sentiment-fetch.js";
+import { fetchCountries, probeScoring } from "../../api/_lib/sentiment-fetch.js";
 import {
+  SCORING_DOWN_KEY,
   selectDueCountries,
   reserveCredits,
   releaseCredits,
@@ -333,5 +334,107 @@ describe("POST /api/cron/refresh - orchestration", () => {
     expect(res.statusCode).toBe(500);
     expect(res.body).toMatchObject({ ok: false, error: "upstream down" });
     expect(redis._store.has(LOCK_KEY)).toBe(false); // released in finally
+  });
+});
+
+describe("POST /api/cron/refresh - scoring breaker", () => {
+  const dueSelection = () =>
+    ({
+      subset: [{ code: "us" }, { code: "gb" }],
+      counts: { gnews: 2, newsdata: 0 },
+      dayId: 1,
+      gnDayId: 2,
+      diag: { budget: 5, tzDue: 2, backfill: 0 },
+    }) as any;
+  const DOWN_SINCE = "2026-10-07T12:00:00.000Z";
+
+  beforeEach(() => {
+    vi.mocked(selectDueCountries).mockResolvedValue(dueSelection());
+    vi.mocked(refundCounts).mockReturnValue({ newsdata: 0, gnews: 0 });
+    vi.mocked(rebuildAggregate).mockResolvedValue({ count: 150, dupSets: 2, sharedFeed: 8 });
+  });
+
+  it("does not probe the scorer while no outage is flagged", async () => {
+    vi.mocked(Redis).mockImplementation(function () { return createFakeRedis() as any; });
+    vi.mocked(fetchCountries).mockResolvedValue([] as any);
+    vi.mocked(persistCountries).mockResolvedValue([]);
+
+    await call(authedReq(), mockRes());
+
+    expect(probeScoring).not.toHaveBeenCalled();
+    expect(fetchCountries).toHaveBeenCalledWith(expect.any(Array), expect.any(Object));
+  });
+
+  it("flags the scorer down when every headline came back unscored", async () => {
+    const redis = createFakeRedis();
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
+    vi.mocked(fetchCountries).mockImplementation(async (_subset, stats) => {
+      stats!.scoringFailed = true;
+      return [] as any;
+    });
+    vi.mocked(persistCountries).mockResolvedValue([]);
+
+    await call(authedReq(), mockRes());
+
+    expect(new Date(redis._store.get(SCORING_DOWN_KEY) as string).toISOString()).toBe(redis._store.get(SCORING_DOWN_KEY));
+    expect(vi.mocked(recordTick).mock.calls[0][1].error).toBe("scoring failed for every headline");
+  });
+
+  it("starts a new outage clock when scoring fails again after a passing probe", async () => {
+    const redis = createFakeRedis({ store: { [SCORING_DOWN_KEY]: DOWN_SINCE } });
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
+    vi.mocked(probeScoring).mockResolvedValue(true); // probe passes, then the tick's scoring fails again
+    vi.mocked(fetchCountries).mockImplementation(async (_subset, stats) => {
+      stats!.scoringFailed = true;
+      return [] as any;
+    });
+    vi.mocked(persistCountries).mockResolvedValue([]);
+
+    await call(authedReq(), mockRes());
+
+    // The probe cleared it and the tick set it afresh - a new outage, a new time.
+    expect(redis._store.get(SCORING_DOWN_KEY)).not.toBe(DOWN_SINCE);
+    expect(redis._store.has(SCORING_DOWN_KEY)).toBe(true);
+  });
+
+  it("spends no credits while the probe still fails", async () => {
+    const redis = createFakeRedis({ store: { [SCORING_DOWN_KEY]: DOWN_SINCE } });
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
+    vi.mocked(probeScoring).mockResolvedValue(false);
+
+    const res = mockRes();
+    await call(authedReq(), res);
+
+    expect(res.statusCode).toBe(200); // a non-2xx would make QStash retry
+    expect(res.body).toEqual({ ok: false, reason: "scoring_unavailable", since: DOWN_SINCE, aggregate: 150 });
+    expect(reserveCredits).not.toHaveBeenCalled();
+    expect(fetchCountries).not.toHaveBeenCalled();
+    expect(redis._store.get(SCORING_DOWN_KEY)).toBe(DOWN_SINCE);
+    expect(vi.mocked(recordTick).mock.calls[0][1]).toMatchObject({
+      ok: 0,
+      attempted: 0,
+      aggregate: 150,
+      error: `scoring unavailable since ${DOWN_SINCE}`,
+      dupSets: 2,
+      sharedFeed: 8,
+    });
+    expect(redis._store.has(LOCK_KEY)).toBe(false);
+  });
+
+  it("clears the flag and runs the tick once the probe passes", async () => {
+    const redis = createFakeRedis({ store: { [SCORING_DOWN_KEY]: DOWN_SINCE } });
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
+    vi.mocked(probeScoring).mockResolvedValue(true);
+    vi.mocked(fetchCountries).mockResolvedValue([{ code: "us", score: 0.4, articles: [{ title: "a", score: 0.4 }] }] as any);
+    vi.mocked(persistCountries).mockResolvedValue(["us"]);
+
+    const res = mockRes();
+    await call(authedReq(), res);
+
+    expect(redis._store.has(SCORING_DOWN_KEY)).toBe(false);
+    expect(reserveCredits).toHaveBeenCalled();
+    expect(fetchCountries).toHaveBeenCalled();
+    expect(res.body).toMatchObject({ ok: true, refreshed: ["us"] });
+    expect(vi.mocked(recordTick).mock.calls[0][1].error).toBeUndefined();
   });
 });

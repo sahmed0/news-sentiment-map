@@ -5,6 +5,9 @@ import {
   isRetryableNetworkError,
   newsDataLanguages,
   newsDataQuery,
+  probeScoring,
+  PROBE_TIMEOUT_MS,
+  type FetchStats,
   LOW_PRIORITY_COUNTRIES,
 } from "../../api/_lib/sentiment-fetch.js";
 
@@ -564,5 +567,72 @@ describe("fetchCountries - HuggingFace error handling & retry", () => {
     expect(results[0].articles).toHaveLength(1);
     expect(results[0].articles[0].score).toBeNull();
     expect(results[0].score).toBeNull();
+  });
+});
+
+describe("fetchCountries - scoringFailed (the cron's scoring breaker)", () => {
+  const oneEnglish = () => newsOk([{ title: "Hi", link: "http://a", language: "english" }]);
+
+  it("is true when the scorer rejects every headline it is sent", async () => {
+    installFetch({ news: oneEnglish(), hfEng: makeResponse(402, { error: "You have no remaining credits." }) });
+    const stats: FetchStats = {};
+    await fetchCountries([{ code: "ly", name: "Libya" }], stats);
+    expect(stats.scoringFailed).toBe(true);
+  });
+
+  it("is false when the scorer answers", async () => {
+    installFetch({ news: oneEnglish(), hfEng: hfPositive });
+    const stats: FetchStats = {};
+    await fetchCountries([{ code: "ly", name: "Libya" }], stats);
+    expect(stats.scoringFailed).toBe(false);
+  });
+
+  it("is false when nothing reached the scorer (no headlines fetched)", async () => {
+    const fetchFn = installFetch({ news: newsOk([]) });
+    const stats: FetchStats = {};
+    await fetchCountries([{ code: "ly", name: "Libya" }], stats);
+    expect(fetchFn.mock.calls.some(([u]) => u.includes("huggingface"))).toBe(false);
+    expect(stats.scoringFailed).toBe(false);
+  });
+
+  it("is false when every translation failed, since the scorer was never asked", async () => {
+    // Non-English headline + Azure down: the input is "", so HF is never called.
+    installFetch({
+      news: newsOk([{ title: "Hola", link: "http://a", language: "spanish" }]),
+      azure: makeResponse(500, "down"),
+    });
+    const stats: FetchStats = {};
+    await fetchCountries([{ code: "ly", name: "Libya" }], stats);
+    expect(stats.scoringFailed).toBe(false);
+  });
+});
+
+describe("probeScoring", () => {
+  it("is true when the scorer returns a score", async () => {
+    const fetchFn = installFetch({ hfEng: hfPositive });
+    await expect(probeScoring()).resolves.toBe(true);
+    // One request, one headline - the probe must stay cheap.
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchFn.mock.calls[0][1].body).inputs).toHaveLength(1);
+  });
+
+  it("is false when the scorer rejects the request", async () => {
+    installFetch({ hfEng: makeResponse(402, { error: "You have no remaining credits." }) });
+    await expect(probeScoring()).resolves.toBe(false);
+  });
+
+  it("gives up after PROBE_TIMEOUT_MS when the scorer hangs", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    // Never answers, so only the probe's own timer can end the wait.
+    installFetch({ hfEng: (() => new Promise<FakeResponse>(() => {})) as unknown as Route });
+    const t0 = Date.now();
+    let settledAt = -1;
+    const p = probeScoring().then((ok) => {
+      settledAt = Date.now();
+      return ok;
+    });
+    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS + 60_000);
+    await expect(p).resolves.toBe(false);
+    expect(settledAt - t0).toBe(PROBE_TIMEOUT_MS);
   });
 });
