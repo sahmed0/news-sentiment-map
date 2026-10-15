@@ -5,8 +5,9 @@ import { createFakeRedis } from "../helpers/fakeRedis.js";
 // Isolate the cron handler from Redis and the fetch/select/persist pipeline so we
 // test only its orchestration: auth, env guard, lock, branch selection, lock release.
 vi.mock("@upstash/redis", () => ({ Redis: vi.fn() }));
-vi.mock("../../api/_lib/sentiment-fetch.js", () => ({ fetchCountries: vi.fn() }));
+vi.mock("../../api/_lib/sentiment-fetch.js", () => ({ fetchCountries: vi.fn(), probeScoring: vi.fn() }));
 vi.mock("../../api/_lib/refresh-core.js", () => ({
+  SCORING_DOWN_KEY: "sentiment:scoring:down",
   selectDueCountries: vi.fn(),
   reserveCredits: vi.fn(),
   releaseCredits: vi.fn(),
