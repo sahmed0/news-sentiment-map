@@ -76,10 +76,15 @@ const [HIGH2, LOW] = [
   COUNTRIES.find((c) => !HIGH_PRIORITY_CODES.has(c.code))!.code,
 ];
 
+// Every country refreshed an hour ago: a healthy map, so a test only sees stale
+// countries when it seeds them.
+const allFresh = (): Record<string, number> =>
+  Object.fromEntries(COUNTRIES.map((c) => [c.code, NOW.getTime() - HOUR]));
+
 const seed = (opts: { ticks?: string[]; fresh?: Record<string, number>; nd?: number; gn?: number } = {}) =>
   createFakeRedis({
     lists: opts.ticks ? { [TICKS_KEY]: opts.ticks } : {},
-    zsets: opts.fresh ? { [FRESH_KEY]: opts.fresh } : {},
+    zsets: { [FRESH_KEY]: opts.fresh ?? allFresh() },
     store: {
       ...(opts.nd === undefined ? {} : { [ND_CREDIT_DAY_KEY(dayId(NOW))]: opts.nd }),
       ...(opts.gn === undefined ? {} : { [GN_CREDIT_DAY_KEY(gnDayId(NOW))]: opts.gn }),
@@ -212,6 +217,27 @@ describe("GET /api/health", () => {
     const res = mockRes();
     await call(res);
     expect(res.body.staleCountries.count).toBe(COUNTRIES.length - 1);
+  });
+
+  it("degrades when more than a quarter of the map is stale, even with on-time ticks", async () => {
+    const fresh = allFresh();
+    const staleCodes = COUNTRIES.slice(0, Math.floor(COUNTRIES.length / 4) + 1).map((c) => c.code);
+    for (const code of staleCodes) fresh[code] = NOW.getTime() - 10 * DAY;
+    useRedis(seed({ ticks: [tick(60_000)], fresh }));
+    const res = mockRes();
+    await call(res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.status).toBe("degraded");
+    expect(res.body.staleCountries.count).toBe(staleCodes.length);
+  });
+
+  it("stays ok with a quarter of the map stale", async () => {
+    const fresh = allFresh();
+    for (const c of COUNTRIES.slice(0, Math.floor(COUNTRIES.length / 4))) fresh[c.code] = NOW.getTime() - 10 * DAY;
+    useRedis(seed({ ticks: [tick(60_000)], fresh }));
+    const res = mockRes();
+    await call(res);
+    expect(res.body.status).toBe("ok");
   });
 
   it("degrades to a 503 instead of throwing when Redis is unreachable", async () => {

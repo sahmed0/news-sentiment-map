@@ -33,6 +33,11 @@ const DEGRADED_MAX_AGE_MS = 6 * HOUR_MS;
 // can't leave this check measuring the old one.
 const HIGH_PRIORITY_STALE_MS = 2 * 24 * HOUR_MS;
 const LOW_PRIORITY_STALE_MS = 2 * LOW_PRIORITY_DAYS * 24 * HOUR_MS;
+// Past this share of stale countries the map is visibly out of date even though
+// ticks keep arriving on time - the failure a tick-age check alone can't see.
+// A quarter is reached about two days into an outage, when the high-priority
+// countries pass their limit.
+const STALE_DEGRADED_SHARE = 0.25;
 // How many recent ticks to search for article-overlap numbers.
 const OVERLAP_LOOKBACK_TICKS = 10;
 
@@ -97,11 +102,15 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     return now.getTime() - last > limit;
   }).length;
 
-  // A tick that ran but threw is as bad as a late one: the data didn't move.
+  // A tick that ran but threw is as bad as a late one: the data didn't move. So
+  // is a map mostly past its refresh limits - on-time ticks that save nothing
+  // must not read as healthy.
   const status =
     ageMs === null || ageMs > DEGRADED_MAX_AGE_MS
       ? "down"
-      : ageMs > OK_MAX_AGE_MS || (lastTick && lastTick.error)
+      : ageMs > OK_MAX_AGE_MS ||
+          (lastTick && lastTick.error) ||
+          staleCount > COUNTRIES.length * STALE_DEGRADED_SHARE
         ? "degraded"
         : "ok";
 
