@@ -28,8 +28,9 @@ const LOCK_KEY = "sentiment:refresh:lock";
 const LOCK_TTL = 300; // seconds
 
 // Fluid Compute is enabled, so Hobby allows up to 300 s. We use the full ceiling
-// as a safety net; the per-tick batch (MAX_PER_WINDOW) and per-request fetch
-// timeouts keep a normal tick far shorter than this.
+// as a safety net; the per-tick batch caps (NEWSDATA_MAX_PER_TICK /
+// GNEWS_MAX_PER_TICK) and per-request fetch timeouts keep a normal tick far
+// shorter than this.
 export const config = { maxDuration: 300 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

@@ -1,4 +1,4 @@
-// src/hooks/useMediaQuery.js
+// src/hooks/useMediaQuery.ts
 import { useEffect, useState } from "react";
 
 // Subscribe to a CSS media query and re-render when it flips.

@@ -13,7 +13,7 @@
    viewport. Tablets/desktops are comfortably taller than 500px, so they're
    unaffected; only short landscape phones (and unusually short browser windows)
    fall back to the roomier mobile layout. Keep this height in sync with the
-   `useIsMobile` hook in src/hooks/useMediaQuery.js. */
+   `useIsMobile` hook in src/hooks/useMediaQuery.ts. */
 @custom-variant sm (@media (min-width: 768px) and (min-height: 500px));
 @custom-variant md (@media (min-width: 1024px) and (min-height: 500px));
 

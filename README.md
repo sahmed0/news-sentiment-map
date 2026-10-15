@@ -98,7 +98,7 @@ than to blank.
 
 ### Two-provider routing with a translation pivot
 
-GNews ranks by popularity but covers ~71 countries; NewsData.io reaches ~155 but returns by recency.
+GNews ranks by popularity but covers far fewer countries (we route our 68 high-priority ones to it); NewsData.io reaches ~155 but returns by recency.
 High-priority countries are therefore fetched from GNews and the rest from NewsData, behind one
 enriched shape. On the model side, only one sentiment model is deployed: every non-English headline is
 pivoted through Azure Translator into English and scored there, which keeps one calibration to reason

@@ -65,7 +65,8 @@ export const NEWSDATA_MAX_PER_TICK = 20;
 export const NEWSDATA_MAX_PER_DAY = 100;
 // GNews free tier: ~100 requests / day (no documented sub-window limit). Stay a
 // margin under the daily cap; GNEWS_MAX_PER_TICK bounds per-tick GNews work the
-// way MAX_PER_WINDOW does for NewsData, so a big backfill can't overload one tick.
+// way NEWSDATA_MAX_PER_TICK does for NewsData, so a big backfill can't overload
+// one tick.
 export const GNEWS_MAX_PER_DAY = 90;
 export const GNEWS_MAX_PER_TICK = 20;
 export const LOW_PRIORITY_DAYS = 2; // countries only in LOW_PRIORITY_COUNTRIES refresh at most every LOW_PRIORITY_DAYS days

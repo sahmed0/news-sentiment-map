@@ -1,4 +1,4 @@
-// src/hooks/useTheme.js
+// src/hooks/useTheme.ts
 import { useEffect, useState } from "react";
 
 type Theme = "light" | "dark";

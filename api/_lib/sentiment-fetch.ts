@@ -1,4 +1,6 @@
-// Shared fetch logic used by both the on-demand handler and the cron pre-warmer
+// Fetch + translate + score logic for the hourly refresh tick. api/cron/refresh.ts
+// is the only caller: the read endpoints never touch a provider, which is what
+// keeps user traffic from spending credits.
 
 import { now, since, log, debug, DEBUG } from "./logger.js";
 import type { Article, CountryDef, CountryResult, RawArticle } from "../../shared/types.js";
@@ -177,7 +179,8 @@ export const LOW_PRIORITY_COUNTRIES: readonly CountryDef[] = [
 ];
 
 // All supported countries, high tier first. Derived so existing consumers
-// (rebuildAggregate, fetchAllCountries) keep working against one flat list.
+// (rebuildAggregate, the scheduler, health, history) keep working against one
+// flat list.
 export const COUNTRIES: readonly CountryDef[] = [...HIGH_PRIORITY_COUNTRIES, ...LOW_PRIORITY_COUNTRIES];
 
 // O(1) tier test for the scheduler. Membership = "fetched every day"; every
@@ -185,7 +188,6 @@ export const COUNTRIES: readonly CountryDef[] = [...HIGH_PRIORITY_COUNTRIES, ...
 // LOW_PRIORITY_DAYS days (see refresh-core.ts), split into even per-day cohorts.
 export const HIGH_PRIORITY_CODES = new Set<string>(HIGH_PRIORITY_COUNTRIES.map((c) => c.code));
 
-export const CACHE_TTL = 25 * 60 * 60; // 25 hours - overlap ensures cron always refreshes before expiry
 export const NEWSDATA_DELAY_MS = 2000; // gap between consecutive requests - keeps us under NewsData.io's 1 req/sec limit (1000ms safety margin)
 export const NEWSDATA_MAX_RETRIES = 2; // retries on HTTP 429 / transient network errors before giving up on a country
 export const NEWSDATA_BACKOFF_BASE_MS = 6000; // first backoff when no Retry-After header is present
@@ -433,7 +435,7 @@ async function fetchHeadlines(country: FetchTarget): Promise<FetchOutcome> {
 
 // GNews top-headlines: popularity/relevance-ranked top stories per country - the
 // app's focus - complementing NewsData's recency-only feed. Used for high-priority
-// countries (all within GNews's ~71-country coverage). Returns the SAME contract
+// countries (all 68 are within GNews's country coverage). Returns the SAME contract
 // as fetchHeadlines - { articles, status, latencyMs, attempts } - so fetchCountries
 // can route by tier without caring which provider produced the headlines.
 //
@@ -703,7 +705,6 @@ export interface FetchTarget {
   code: string;
   name: string;
   lang?: string;
-  utcOffset?: number;
 }
 
 // Per-country fetch outcome, merged with scores in Phase 5.
@@ -753,7 +754,7 @@ type Fetcher = (country: FetchTarget) => Promise<FetchOutcome>;
 
 // Fetch + score a specific subset of countries. `subset` is a list of
 // { code, name } entries (a slice of COUNTRIES). Returns one enriched country
-// object per input, in input order. `fetchAllCountries` is the whole-world case.
+// object per input, in input order.
 // The optional `stats` object is filled in place with per-stage timings, counts,
 // and a per-country breakdown for debugging (surfaced in the cron's response).
 export async function fetchCountries(subset: FetchTarget[], stats: FetchStats = {}): Promise<CountryResult[]> {
@@ -908,9 +909,4 @@ export async function fetchCountries(subset: FetchTarget[], stats: FetchStats = 
   log("Phase", "done", stats.timings);
 
   return results;
-}
-
-// Whole-world fetch - kept for the daily safety-net cron and any full reconcile.
-export async function fetchAllCountries(): Promise<CountryResult[]> {
-  return fetchCountries([...COUNTRIES]);
 }

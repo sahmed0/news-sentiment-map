@@ -1,8 +1,8 @@
 import { defineConfig } from "vitest/config";
 
-// Backend (api/**) tests run in the default Node environment. The single React
-// hook test opts into jsdom via a `// @vitest-environment jsdom` docblock at the
-// top of that file, so the rest of the suite stays fast in Node.
+// Tests run in the default Node environment. React component and hook tests opt
+// into jsdom with a `// @vitest-environment jsdom` docblock, so the api/ and lib/
+// suites stay fast in Node.
 export default defineConfig({
   test: {
     globals: true,
