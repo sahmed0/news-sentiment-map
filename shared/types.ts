@@ -158,6 +158,7 @@ export interface RedisLike {
   ltrim(key: string, start: number, stop: number): Promise<string>;
   lrange(key: string, start: number, stop: number): Promise<unknown[]>;
   mget(...keys: string[]): Promise<unknown[]>;
+  eval(script: string, keys: string[], args: string[]): Promise<unknown>;
   pipeline(): RedisPipelineLike;
 }
 

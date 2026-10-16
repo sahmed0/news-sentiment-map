@@ -5,8 +5,9 @@
 // Bearer CRON_SECRET that QStash forwards via Upstash-Forward-Authorization.
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { fetchCountries, probeScoring } from "../_lib/sentiment-fetch.js";
+import { LOCK_KEY, LOCK_RELEASE_LUA } from "../_lib/lock.js";
 import {
   SCORING_DOWN_KEY,
   selectDueCountries,
@@ -22,10 +23,10 @@ import { log, warn, err, now, since } from "../_lib/logger.js";
 import type { FetchStats } from "../_lib/sentiment-fetch.js";
 import type { TickSummary } from "../../shared/types.js";
 
-const LOCK_KEY = "sentiment:refresh:lock";
-// Match maxDuration (300 s) so the lock can't expire mid-tick and let a second
-// invocation start while this one is still fetching/scoring. The finally block
-// releases it as soon as the tick finishes, so a healthy tick never holds it long.
+// Matches maxDuration (300 s). The TTL frees a lock orphaned by a function that
+// was killed before its finally block ran. If a tick outlives it, a successor may
+// take the lock; the token-checked release ensures this tick never deletes it. A
+// healthy tick releases the lock as soon as it finishes.
 const LOCK_TTL = 300; // seconds
 
 // Fluid Compute is enabled, so Hobby allows up to 300 s. We use the full ceiling
@@ -60,7 +61,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { Redis } = await import("@upstash/redis");
   const redis = new Redis({ url: redisUrl, token: redisToken });
 
-  const lockAcquired = await redis.set(LOCK_KEY, "1", { nx: true, ex: LOCK_TTL });
+  const lockToken = randomUUID();
+  const lockAcquired = await redis.set(LOCK_KEY, lockToken, { nx: true, ex: LOCK_TTL });
   if (!lockAcquired) {
     return res.status(200).json({ ok: false, reason: "tick already in progress" });
   }
@@ -246,6 +248,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     return res.status(500).json({ ok: false, error: message });
   } finally {
-    await redis.del(LOCK_KEY);
+    // A failed release must never turn a healthy tick into a 500; the TTL is the
+    // backstop.
+    try {
+      await redis.eval(LOCK_RELEASE_LUA, [LOCK_KEY], [lockToken]);
+    } catch (e) {
+      warn("Tick", "lock_release_failed", { message: e instanceof Error ? e.message : String(e) });
+    }
   }
 }

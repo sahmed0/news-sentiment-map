@@ -1,18 +1,21 @@
 // In-memory Upstash-Redis double. Implements only the methods the app actually
 // calls (get/set/del/incrby/expire/smembers/sadd/zadd/zrange/zremrangebyscore/
-// zremrangebyrank/lpush/ltrim/lrange/mget + pipeline), with just enough fidelity
+// zremrangebyrank/lpush/ltrim/lrange/mget/eval + pipeline), with just enough fidelity
 // for the scheduling, credit-ledger, history, tick-log, and handler tests:
 //   - set({ nx, ex }) returns "OK" or null so lock semantics work
 //   - zrange({ withScores }) returns a flat [member, score, ...] sorted by score
 //   - zremrangeby* treat both bounds as inclusive and resolve negative ranks
 //   - lpush prepends (so index 0 is the newest); lrange/ltrim treat both bounds as
 //     inclusive, resolve negative indices from the end, and clamp out-of-range ones
+//   - eval recognises the exact Lua scripts the code ships and runs their
+//     semantics in JS; it does not interpret Lua
 //   - pipeline() queues ops (including zrange, which the world-history rebuild
 //     pipelines one-per-country) and applies them on exec() in queue order
 // TTLs (ex / expire) are intentionally no-ops: tests inject `now`, they don't
 // wait for real expiry.
 
 import type { RedisLike, RedisPipelineLike } from "../../shared/types.js";
+import { LOCK_RELEASE_LUA } from "../../api/_lib/lock.js";
 
 // The fake satisfies RedisLike (so it can stand in for the real client) plus a few
 // test-only handles for assertions.
@@ -147,6 +150,22 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
     },
     async mget(...keys) {
       return keys.map((k) => (store.has(k) ? store.get(k) : null));
+    },
+    // Not a Lua interpreter: the fake recognises the exact scripts the code ships
+    // and implements their semantics in JS. An unknown script throws rather than
+    // silently succeeding, so adding a script without teaching the fake about it
+    // fails loudly in tests instead of passing vacuously.
+    async eval(script, keys, args) {
+      if (script === LOCK_RELEASE_LUA) {
+        const [key] = keys;
+        const [token] = args;
+        if (store.get(key) === token) {
+          store.delete(key);
+          return 1;
+        }
+        return 0;
+      }
+      throw new Error(`fakeRedis: unknown script: ${script.slice(0, 60)}`);
     },
     pipeline(): RedisPipelineLike {
       const ops: [string, unknown[]][] = [];
