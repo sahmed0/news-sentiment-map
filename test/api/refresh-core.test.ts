@@ -12,6 +12,7 @@ import {
   refundCounts,
   persistCountries,
   isTransientStatus,
+  isRefundableStatus,
   rebuildAggregate,
   lowPriorityDueOn,
   HISTORY_KEY,
@@ -227,7 +228,7 @@ describe("reserveCredits", () => {
 });
 
 describe("releaseCredits + refundCounts", () => {
-  it("refundCounts counts only transient fetches, split by provider tier", () => {
+  it("refundCounts counts only refundable fetches, split by provider tier", () => {
     const lowCode = COUNTRIES.find((c) => !HIGH_PRIORITY_CODES.has(c.code))!.code;
     const results = [
       { code: "us", status: "timeout" },           // transient, high tier → GNews
@@ -237,6 +238,27 @@ describe("releaseCredits + refundCounts", () => {
       { code: "de", status: "unsupported" },       // terminal, no refund
     ];
     expect(refundCounts(results)).toEqual({ gnews: 1, newsdata: 1 });
+  });
+
+  // One low-priority (NewsData) fetch per status, so each count reads directly.
+  const refundFor = (status: string) =>
+    refundCounts([{ code: COUNTRIES.find((c) => !HIGH_PRIORITY_CODES.has(c.code))!.code, status }]).newsdata;
+
+  it("keeps the charge for api_error and invalid_json, which follow a served HTTP 200", () => {
+    expect(refundFor("api_error")).toBe(0);
+    expect(refundFor("invalid_json")).toBe(0);
+  });
+
+  it("refunds statuses the provider probably never served", () => {
+    for (const s of ["timeout", "network_error", "rate_limited", "http_503"]) {
+      expect(refundFor(s)).toBe(1);
+    }
+  });
+
+  it("refunds the thrown-exception status fetchBatch records as \"error\"", () => {
+    // fetchBatch's catch sets status "error" when a fetcher throws outright.
+    expect(refundFor("error")).toBe(1);
+    expect(refundCounts([{ code: "us", status: "error" }])).toEqual({ gnews: 1, newsdata: 0 });
   });
 
   it("decrements the daily ledgers, reclaiming only the refunded subset", async () => {
@@ -296,6 +318,25 @@ describe("persistCountries", () => {
     expect(redis._store.has("sentiment:country:jp")).toBe(false);
     expect(redis._zsets.get("sentiment:freshness")!.has("jp")).toBe(true);
     expect(redis._sets.get(`sentiment:done:${day}`)!.has("jp")).toBe(true);
+  });
+});
+
+describe("persistCountries retry vs refund", () => {
+  it("still leaves an api_error country un-done for a retry, though its credit is not refunded", async () => {
+    const redis = createFakeRedis();
+    const day = 500;
+    const results = [
+      { code: "fr", name: "FR", articles: [], score: null, status: "api_error" },
+      { code: "it", name: "IT", articles: [], score: null, status: "invalid_json" },
+    ];
+
+    expect(await persistCountries(redis, results, day)).toEqual([]);
+    for (const code of ["fr", "it"]) {
+      expect(redis._store.has(`sentiment:country:${code}`)).toBe(false);
+      expect(redis._zsets.get("sentiment:freshness")?.has(code) ?? false).toBe(false);
+      expect(redis._sets.get(`sentiment:done:${day}`)?.has(code) ?? false).toBe(false);
+    }
+    expect(refundCounts(results)).toEqual({ gnews: 0, newsdata: 0 });
   });
 });
 
@@ -402,6 +443,20 @@ describe("recordTick", () => {
     expect(rows).toHaveLength(TICKS_MAX);
     expect(rows[0]).toBe(TICKS_MAX); // newest kept
     expect(rows[TICKS_MAX - 1]).toBe(1); // tick 0 evicted
+  });
+});
+
+describe("isRefundableStatus", () => {
+  it("is narrower than the retry set: malformed-200 statuses retry but are not refunded", () => {
+    for (const s of ["timeout", "network_error", "rate_limited", "error", "http_500", "http_503"]) {
+      expect(isRefundableStatus(s)).toBe(true);
+    }
+    for (const s of ["api_error", "invalid_json", "empty", "unsupported", "ok", "http_404", "http_422", undefined, null, ""]) {
+      expect(isRefundableStatus(s)).toBe(false);
+    }
+    // Every refundable status is also retried; the converse no longer holds.
+    expect(isTransientStatus("api_error")).toBe(true);
+    expect(isTransientStatus("invalid_json")).toBe(true);
   });
 });
 
