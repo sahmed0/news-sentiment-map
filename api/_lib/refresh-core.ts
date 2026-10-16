@@ -342,9 +342,12 @@ export function refundCounts(results: readonly StatusResult[]): ProviderCounts {
 // Fetch outcomes worth retrying later the same day - a provider-side blip the
 // daily budget slack is sized to absorb - vs terminal outcomes (empty /
 // unsupported / 4xx) that won't improve on a retry. The status strings come
-// from fetchHeadlines / fetchHeadlinesGNews (see sentiment-fetch.ts).
+// from fetchHeadlines / fetchHeadlinesGNews (see sentiment-fetch.ts), plus
+// fetchCountries' deadline_skipped: the tick ran out of time before requesting
+// that country, so a later tick the same day can still pick it up.
 const TRANSIENT_STATUSES = new Set<string>([
   "timeout", "network_error", "rate_limited", "api_error", "invalid_json", "error",
+  "deadline_skipped",
 ]);
 export function isTransientStatus(status: string | null | undefined): boolean {
   if (!status) return false;
@@ -356,11 +359,22 @@ export function isTransientStatus(status: string | null | undefined): boolean {
 // Which statuses get their reserved credit back. This is deliberately NARROWER
 // than TRANSIENT_STATUSES: a status is refundable only when the provider
 // probably did not serve (and therefore did not charge for) the request.
+//
+//   network_error     no response at all                        -> refund
+//   rate_limited      429, rejected before any work             -> refund
+//   http_5xx          provider-side failure                     -> refund
+//   timeout           ambiguous; may have completed server-side  -> refund (see note)
+//                     (includes a request cut short by the tick budget)
+//   error             threw before/while requesting              -> refund
+//   deadline_skipped  tick ran out of time before requesting it  -> refund
+//   api_error         follows a 200 with a malformed body        -> NO refund
+//   invalid_json      follows a 200 with a malformed body        -> NO refund
+//
 // `timeout` stays refundable because a request that never completed is genuinely
 // ambiguous, and over-refunding a timeout costs at most one credit of slack,
 // whereas a 200 we know was served should keep its charge.
 const REFUNDABLE_STATUSES = new Set<string>([
-  "timeout", "network_error", "rate_limited", "error",
+  "timeout", "network_error", "rate_limited", "error", "deadline_skipped",
 ]);
 
 export function isRefundableStatus(status: string | null | undefined): boolean {

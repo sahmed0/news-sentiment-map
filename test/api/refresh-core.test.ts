@@ -261,6 +261,11 @@ describe("releaseCredits + refundCounts", () => {
     expect(refundCounts([{ code: "us", status: "error" }])).toEqual({ gnews: 1, newsdata: 0 });
   });
 
+  it("refunds deadline_skipped: the tick budget ran out before the request was sent", () => {
+    expect(refundFor("deadline_skipped")).toBe(1);
+    expect(refundCounts([{ code: "us", status: "deadline_skipped" }])).toEqual({ gnews: 1, newsdata: 0 });
+  });
+
   it("decrements the daily ledgers, reclaiming only the refunded subset", async () => {
     const redis = createFakeRedis();
     const ledger = { dayId: 100, gnDayId: 101 };
@@ -448,7 +453,7 @@ describe("recordTick", () => {
 
 describe("isRefundableStatus", () => {
   it("is narrower than the retry set: malformed-200 statuses retry but are not refunded", () => {
-    for (const s of ["timeout", "network_error", "rate_limited", "error", "http_500", "http_503"]) {
+    for (const s of ["timeout", "network_error", "rate_limited", "error", "deadline_skipped", "http_500", "http_503"]) {
       expect(isRefundableStatus(s)).toBe(true);
     }
     for (const s of ["api_error", "invalid_json", "empty", "unsupported", "ok", "http_404", "http_422", undefined, null, ""]) {
@@ -462,7 +467,7 @@ describe("isRefundableStatus", () => {
 
 describe("isTransientStatus", () => {
   it("classifies provider blips as transient and terminal outcomes as not", () => {
-    for (const s of ["timeout", "network_error", "rate_limited", "api_error", "invalid_json", "error", "http_500", "http_503"]) {
+    for (const s of ["timeout", "network_error", "rate_limited", "api_error", "invalid_json", "error", "deadline_skipped", "http_500", "http_503"]) {
       expect(isTransientStatus(s)).toBe(true);
     }
     for (const s of ["empty", "unsupported", "ok", "http_404", "http_422", undefined, null, ""]) {
