@@ -1,9 +1,11 @@
 // The fake's zset trimming is what the history cap and the same-day overwrite
-// rely on, and its list ops are what the tick log's newest-first ordering and cap
-// rely on, so its Redis fidelity is worth asserting directly - a bug here would
-// silently weaken every test that trusts it.
+// rely on, its list ops are what the tick log's newest-first ordering and cap
+// rely on, and its eval stand-in is what the lock-ownership tests rely on, so its
+// Redis fidelity is worth asserting directly - a bug here would silently weaken
+// every test that trusts it.
 import { describe, it, expect } from "vitest";
 import { createFakeRedis } from "./fakeRedis.js";
+import { LOCK_RELEASE_LUA } from "../../api/_lib/lock.js";
 
 const seed = (scores: number[]) =>
   createFakeRedis({
@@ -104,5 +106,33 @@ describe("fakeRedis list ops", () => {
     const redis = createFakeRedis({ lists: { l: ["a", "b"] } });
     await redis.ltrim("l", 5, 1);
     expect(redis._lists.has("l")).toBe(false);
+  });
+});
+
+describe("fakeRedis eval", () => {
+  const KEY = "sentiment:refresh:lock";
+
+  it("deletes the key and returns 1 when the token matches (the owner releasing)", async () => {
+    const redis = createFakeRedis({ store: { [KEY]: "mine" } });
+    expect(await redis.eval(LOCK_RELEASE_LUA, [KEY], ["mine"])).toBe(1);
+    expect(redis._store.has(KEY)).toBe(false);
+  });
+
+  it("leaves the key and returns 0 when the token differs (a successor owns it)", async () => {
+    const redis = createFakeRedis({ store: { [KEY]: "theirs" } });
+    expect(await redis.eval(LOCK_RELEASE_LUA, [KEY], ["mine"])).toBe(0);
+    expect(redis._store.get(KEY)).toBe("theirs");
+  });
+
+  it("returns 0 for a missing key", async () => {
+    const redis = createFakeRedis();
+    expect(await redis.eval(LOCK_RELEASE_LUA, [KEY], ["mine"])).toBe(0);
+    expect(redis._store.has(KEY)).toBe(false);
+  });
+
+  it("throws on a script it has not been taught, rather than passing vacuously", async () => {
+    const redis = createFakeRedis({ store: { [KEY]: "mine" } });
+    await expect(redis.eval('return redis.call("del", KEYS[1])', [KEY], [])).rejects.toThrow(/unknown script/);
+    expect(redis._store.get(KEY)).toBe("mine");
   });
 });

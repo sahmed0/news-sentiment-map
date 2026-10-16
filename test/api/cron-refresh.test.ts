@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
+import { LOCK_KEY } from "../../api/_lib/lock.js";
 
 // Isolate the cron handler from Redis and the fetch/select/persist pipeline so we
 // test only its orchestration: auth, env guard, lock, branch selection, lock release.
@@ -32,8 +33,6 @@ import {
   refreshWorldHistory,
   recordTick,
 } from "../../api/_lib/refresh-core.js";
-
-const LOCK_KEY = "sentiment:refresh:lock";
 
 interface MockRes {
   statusCode: number | null;
@@ -111,6 +110,21 @@ describe("POST /api/cron/refresh - guards", () => {
     const res = mockRes();
     await call(authedReq(), res);
     expect(res.statusCode).toBe(500);
+  });
+
+  it("rejects a GET carrying a valid bearer with 405 and runs no tick", async () => {
+    const res = mockRes();
+    await call(asReq({ authorization: "Bearer secret" }, "GET"), res);
+    expect(res.statusCode).toBe(405);
+    expect(res.body).toEqual({ error: "Method not allowed" });
+    expect(Redis).not.toHaveBeenCalled();
+    expect(selectDueCountries).not.toHaveBeenCalled();
+  });
+
+  it("answers an unauthenticated GET with 401, not 405, so the method check reveals nothing", async () => {
+    const res = mockRes();
+    await call(asReq({}, "GET"), res);
+    expect(res.statusCode).toBe(401);
   });
 
   it("exits early when another tick already holds the lock", async () => {
@@ -437,5 +451,74 @@ describe("POST /api/cron/refresh - scoring breaker", () => {
     expect(fetchCountries).toHaveBeenCalled();
     expect(res.body).toMatchObject({ ok: true, refreshed: ["us"] });
     expect(vi.mocked(recordTick).mock.calls[0][1].error).toBeUndefined();
+  });
+});
+
+describe("POST /api/cron/refresh - lock ownership", () => {
+  const idleSelection = { subset: [], counts: { gnews: 0, newsdata: 0 }, dayId: 1, gnDayId: 2, diag: { budget: 0 } } as any;
+
+  it("holds the lock under a per-invocation token and releases the lock it owns", async () => {
+    const redis = createFakeRedis();
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
+    let heldDuringTick: unknown;
+    vi.mocked(selectDueCountries).mockImplementation(async () => {
+      heldDuringTick = redis._store.get(LOCK_KEY);
+      return idleSelection;
+    });
+    vi.mocked(rebuildAggregate).mockResolvedValue({ count: 0, dupSets: 0, sharedFeed: 0 });
+
+    await call(authedReq(), mockRes());
+
+    // A random token rather than the old constant "1", so two ticks can tell
+    // their locks apart.
+    expect(heldDuringTick).toMatch(/^[0-9a-f-]{36}$/);
+    expect(redis._store.has(LOCK_KEY)).toBe(false);
+  });
+
+  it("does not delete a lock that a successor acquired after this tick's expired", async () => {
+    const redis = createFakeRedis();
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
+    // Simulate the TTL expiring mid-tick and another invocation taking the lock.
+    vi.mocked(selectDueCountries).mockImplementation(async () => {
+      redis._store.set(LOCK_KEY, "successor-token");
+      return idleSelection;
+    });
+    vi.mocked(rebuildAggregate).mockResolvedValue({ count: 0, dupSets: 0, sharedFeed: 0 });
+
+    const res = mockRes();
+    await call(authedReq(), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(redis._store.get(LOCK_KEY)).toBe("successor-token");
+  });
+
+  it("does not delete the successor's lock on the error path either", async () => {
+    const redis = createFakeRedis();
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
+    vi.mocked(selectDueCountries).mockImplementation(async () => {
+      redis._store.set(LOCK_KEY, "successor-token");
+      throw new Error("upstream down");
+    });
+
+    const res = mockRes();
+    await call(authedReq(), res);
+
+    expect(res.statusCode).toBe(500);
+    expect(redis._store.get(LOCK_KEY)).toBe("successor-token");
+  });
+
+  it("still returns 200 when the lock release itself fails", async () => {
+    const redis = createFakeRedis();
+    redis.eval = async () => { throw new Error("redis unreachable"); };
+    vi.mocked(Redis).mockImplementation(function () { return redis as any; });
+    vi.mocked(selectDueCountries).mockResolvedValue(idleSelection);
+    vi.mocked(rebuildAggregate).mockResolvedValue({ count: 7, dupSets: 0, sharedFeed: 0 });
+
+    const res = mockRes();
+    await call(authedReq(), res);
+
+    // The TTL is the backstop for a failed release; the tick itself succeeded.
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, aggregate: 7 });
   });
 });
