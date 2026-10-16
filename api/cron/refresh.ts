@@ -45,6 +45,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
+  // After the auth check, so an unauthenticated probe gets 401 rather than a 405
+  // that confirms the endpoint exists. QStash always POSTs.
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
 
   const redisUrl = process.env.KV_REST_API_URL;
   const redisToken = process.env.KV_REST_API_TOKEN;

@@ -55,7 +55,8 @@ function mockRes(): MockRes {
     },
   };
 }
-const asReq = (headers: Record<string, string> = {}) => ({ headers }) as unknown as VercelRequest;
+// QStash always POSTs, so that is the default; the method guard test overrides it.
+const asReq = (headers: Record<string, string> = {}, method = "POST") => ({ headers, method }) as unknown as VercelRequest;
 const authedReq = () => asReq({ authorization: "Bearer secret" });
 const call = (req: VercelRequest, res: MockRes) => handler(req, res as unknown as VercelResponse);
 
