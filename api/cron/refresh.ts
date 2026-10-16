@@ -166,8 +166,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await redis.set(SCORING_DOWN_KEY, new Date().toISOString(), { nx: true });
       err("Tick", "scoring_failed", { headlines: stats.counts?.headlines });
     }
-    // Refund credits reserved for transient failures: they're retried next tick and
-    // typically never consumed the provider's real quota, so reclaim the slack.
+    // Refund credits reserved for fetches the provider probably never served (see
+    // isRefundableStatus). A malformed 200 was served, so it keeps its charge.
     const refunded = refundCounts(results);
     await releaseCredits(redis, refunded, selection);
     const refreshed = await persistCountries(redis, results, selection.dayId);

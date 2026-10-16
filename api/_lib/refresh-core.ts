@@ -300,14 +300,16 @@ export async function reserveCredits(redis: RedisLike, counts: ProviderCounts, {
   await p.exec();
 }
 
-// Refund credits reserved for fetches that failed transiently. Such a fetch is
-// retried next tick by persistCountries AND typically never consumed the provider's
-// real daily quota (a timeout/5xx/rate-limit/connection blip), so the up-front
-// reservation should be released - otherwise the daily slack is spent on failures
-// instead of recovery. Mirrors reserveCredits but only touches the daily ledgers
-// (the keys already carry a TTL from the reservation). Terminal outcomes
-// (empty/unsupported/4xx) and scorable-but-unscored fetches DID hit the provider,
-// so they keep their charge - see refundCounts.
+// Give back the credits reserved for fetches the provider probably never served:
+// no response, a 429 or 5xx rejection, a throw, or a timeout (ambiguous, refunded
+// anyway). Otherwise the daily slack is spent on failures instead of recovery.
+// Everything else was served and counts against the provider's real quota, so it
+// keeps its charge: terminal outcomes (empty/unsupported/4xx), scorable-but-
+// unscored fetches, and api_error/invalid_json, which only follow an HTTP 200
+// with a malformed body. That last pair is still retried (isTransientStatus) -
+// retry asks "might it work next time?", refund asks "were we charged?", and the
+// answers differ. See REFUNDABLE_STATUSES. Mirrors reserveCredits but only
+// touches the daily ledgers (the keys already carry a TTL from the reservation).
 export async function releaseCredits(redis: RedisLike, counts: ProviderCounts, { dayId: day, gnDayId: gnDay }: { dayId: number; gnDayId: number }): Promise<void> {
   const nd = toInt(counts?.newsdata);
   const gn = toInt(counts?.gnews);
@@ -324,13 +326,13 @@ interface StatusResult {
   status?: string;
 }
 
-// Per-provider count of fetches worth refunding: those whose status is transient
-// (the same set that drives the retry decision in persistCountries, so refund and
-// retry stay in lockstep). Split by tier since each provider owns its own ledger.
+// Per-provider count of fetches worth refunding: those whose status is
+// refundable (see REFUNDABLE_STATUSES - narrower than the retry set). Split by
+// tier since each provider owns its own ledger.
 export function refundCounts(results: readonly StatusResult[]): ProviderCounts {
   let newsdata = 0, gnews = 0;
   for (const c of results || []) {
-    if (!isTransientStatus(c.status)) continue;
+    if (!isRefundableStatus(c.status)) continue;
     if (HIGH_PRIORITY_CODES.has(c.code)) gnews++;
     else newsdata++;
   }
@@ -347,6 +349,23 @@ const TRANSIENT_STATUSES = new Set<string>([
 export function isTransientStatus(status: string | null | undefined): boolean {
   if (!status) return false;
   if (TRANSIENT_STATUSES.has(status)) return true;
+  const m = /^http_(\d+)$/.exec(status);
+  return m ? Number(m[1]) >= 500 : false;
+}
+
+// Which statuses get their reserved credit back. This is deliberately NARROWER
+// than TRANSIENT_STATUSES: a status is refundable only when the provider
+// probably did not serve (and therefore did not charge for) the request.
+// `timeout` stays refundable because a request that never completed is genuinely
+// ambiguous, and over-refunding a timeout costs at most one credit of slack,
+// whereas a 200 we know was served should keep its charge.
+const REFUNDABLE_STATUSES = new Set<string>([
+  "timeout", "network_error", "rate_limited", "error",
+]);
+
+export function isRefundableStatus(status: string | null | undefined): boolean {
+  if (!status) return false;
+  if (REFUNDABLE_STATUSES.has(status)) return true;
   const m = /^http_(\d+)$/.exec(status);
   return m ? Number(m[1]) >= 500 : false;
 }
