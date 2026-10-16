@@ -10,6 +10,8 @@ import {
   type FetchStats,
   LOW_PRIORITY_COUNTRIES,
 } from "../../api/_lib/sentiment-fetch.js";
+import { persistCountries, HISTORY_KEY } from "../../api/_lib/refresh-core.js";
+import { createFakeRedis } from "../helpers/fakeRedis.js";
 
 // ---- Response / fetch helpers -------------------------------------------------
 
@@ -634,5 +636,86 @@ describe("probeScoring", () => {
     await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS + 60_000);
     await expect(p).resolves.toBe(false);
     expect(settledAt - t0).toBe(PROBE_TIMEOUT_MS);
+  });
+});
+
+describe("fetchCountries - partial HuggingFace batch failure", () => {
+  it("averages only the scored headlines, and leaves an all-null country retryable", async () => {
+    vi.useFakeTimers();
+    // 58 English headlines across 12 NewsData countries, scored in two HF chunks
+    // (HF_BATCH_SIZE = 50). Sized so the chunk boundary splits one country:
+    //   targets[0]     3 headlines   (indices 0-2)    all in chunk 1
+    //   targets[1..9]  5 each        (indices 3-47)   all in chunk 1
+    //   targets[10]    5             (indices 48-52)  2 in chunk 1, 3 in chunk 2
+    //   targets[11]    5             (indices 53-57)  all in chunk 2
+    const targets = LOW_PRIORITY_COUNTRIES.slice(0, 12).map(({ code, name }) => ({ code, name }));
+    const sizeOf = (i: number) => (i === 0 ? 3 : 5);
+    const split = targets[10].code;
+    const lost = targets[11].code;
+    // The split country's two chunk-1 headlines score +0.8 and -0.6: mean average 0.1.
+    // If nulls were given a value of 0, would average to 0.04 instead.
+    const titleFor = (code: string, i: number) =>
+      code === split && i === 1 ? `neg ${code} ${i}` : `pos ${code} ${i}`;
+
+    let hfCalls = 0;
+    installFetch({
+      news: (url: string) => {
+        const idx = targets.findIndex((t) => url.includes(`country=${t.code}&`)); // the query always continues past the code
+        const code = targets[idx].code;
+        return newsOk(
+          Array.from({ length: sizeOf(idx) }, (_, i) => ({
+            title: titleFor(code, i),
+            link: `http://${code}/${i}`,
+            language: "english",
+          }))
+        );
+      },
+      hfEng: (url: string, opts: any) => {
+        hfCalls += 1;
+        // Chunk 2 fails with a non-retryable status, so its inputs come back null.
+        if (hfCalls > 1) return makeResponse(400, { error: "bad request" });
+        const { inputs } = JSON.parse(opts.body);
+        return makeResponse(
+          200,
+          inputs.map((t: string) =>
+            t.startsWith("neg")
+              ? [{ label: "negative", score: 0.6 }, { label: "neutral", score: 0.4 }]
+              : [{ label: "positive", score: 0.8 }, { label: "neutral", score: 0.2 }]
+          )
+        );
+      },
+    });
+
+    const promise = fetchCountries(targets);
+    await vi.advanceTimersByTimeAsync(120000);
+    const results = await promise;
+    const byCode = new Map(results.map((r) => [r.code, r]));
+
+    expect(hfCalls).toBe(2); // really two chunks, the second failing
+    expect(byCode.get(targets[0].code)!.score).toBeCloseTo(0.8, 5); // fully in chunk 1
+
+    const s = byCode.get(split)!;
+    expect(s.articles.map((a) => a.score === null)).toEqual([false, false, true, true, true]);
+    expect(s.score).toBeCloseTo(0.1, 5);
+
+    const l = byCode.get(lost)!;
+    expect(l.articles).toHaveLength(5);
+    expect(l.articles.every((a) => a.score === null)).toBe(true);
+    expect(l.score).toBeNull();
+
+    // Persist the real results: n counts only the scored headlines, and the
+    // all-null country is scorable-but-unscored - untouched, so it is retried.
+    const redis = createFakeRedis();
+    const day = 500;
+    const refreshed = await persistCountries(redis, results, day);
+    expect(refreshed).toContain(split);
+    expect(refreshed).not.toContain(lost);
+
+    const [point] = (await redis.zrange(HISTORY_KEY(split), 0, -1)) as string[];
+    expect(JSON.parse(point)).toEqual({ d: day, s: 0.1, n: 2 });
+
+    expect(redis._store.has(`sentiment:country:${lost}`)).toBe(false);
+    expect(redis._zsets.get("sentiment:freshness")!.has(lost)).toBe(false);
+    expect(redis._sets.get(`sentiment:done:${day}`)!.has(lost)).toBe(false);
   });
 });
