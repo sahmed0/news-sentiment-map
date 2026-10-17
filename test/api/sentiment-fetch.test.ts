@@ -7,10 +7,11 @@ import {
   newsDataQuery,
   probeScoring,
   PROBE_TIMEOUT_MS,
-  type FetchStats,
   LOW_PRIORITY_COUNTRIES,
+  TICK_BUDGET_MS,
+  type FetchStats,
 } from "../../api/_lib/sentiment-fetch.js";
-import { persistCountries, HISTORY_KEY } from "../../api/_lib/refresh-core.js";
+import { persistCountries, refundCounts, HISTORY_KEY } from "../../api/_lib/refresh-core.js";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
 
 // ---- Response / fetch helpers -------------------------------------------------
@@ -18,7 +19,7 @@ import { createFakeRedis } from "../helpers/fakeRedis.js";
 // A route handler is either a canned response or a function of (url, opts). These
 // are test doubles for `fetch`, so their shapes are deliberately loose.
 type FakeResponse = ReturnType<typeof makeResponse>;
-type Route = FakeResponse | ((url: string, opts: any) => FakeResponse);
+type Route = FakeResponse | ((url: string, opts: any) => FakeResponse | Promise<FakeResponse>);
 interface Routes {
   news?: Route;
   gnews?: Route;
@@ -717,5 +718,114 @@ describe("fetchCountries - partial HuggingFace batch failure", () => {
     expect(redis._store.has(`sentiment:country:${lost}`)).toBe(false);
     expect(redis._zsets.get("sentiment:freshness")!.has(lost)).toBe(false);
     expect(redis._sets.get(`sentiment:done:${day}`)!.has(lost)).toBe(false);
+  });
+});
+
+// ---- Tick time budget (TICK_BUDGET_MS) ---------------------------------------
+
+describe("fetchCountries - tick time budget", () => {
+  // Fake only what the budget reads. Every timeout is a setTimeout (timeoutSignal),
+  // every deadline check reads Date.now().
+  const useBudgetTimers = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+
+  // A provider that never answers on its own: it rejects only when the request's
+  // signal aborts, so the capped timeouts - not the mock - decide the timing.
+  const hang = (_url: string, opts: any) =>
+    new Promise<FakeResponse>((_, reject) => {
+      opts.signal.addEventListener("abort", () => reject(opts.signal.reason));
+    });
+
+  const lowPriority = (...codes: string[]) =>
+    codes.map((code) => {
+      const c = LOW_PRIORITY_COUNTRIES.find((x) => x.code === code)!;
+      return { code: c.code, name: c.name, lang: c.lang };
+    });
+
+  // Runs fetchCountries to completion under fake timers and reports the virtual
+  // time at which it resolved - not when the leftover (unref'd) timers drained.
+  async function runTimed(targets: Parameters<typeof fetchCountries>[0], stats: FetchStats, budgetMs?: number) {
+    const t0 = Date.now();
+    let endedAt = -1;
+    const promise = fetchCountries(targets, stats, { budgetMs }).then((r) => {
+      endedAt = Date.now() - t0;
+      return r;
+    });
+    await vi.runAllTimersAsync();
+    const results = await promise;
+    return { results, endedAt };
+  }
+
+  const statusOf = (stats: FetchStats, code: string) => stats.countries!.find((c) => c.code === code)!.status;
+
+  it("ends a NewsData outage by the budget (was 598 s)", async () => {
+    // Before the budget: dz attempts at 0/66/138 s, zm at
+    // 200/266/338 s, gm at 400/466/538 s - 598 s in all, past maxDuration.
+    useBudgetTimers();
+    const t0 = Date.now();
+    const sentAt: number[] = [];
+    installFetch({
+      news: (url: string, opts: any) => {
+        sentAt.push(Date.now() - t0);
+        return hang(url, opts);
+      },
+    });
+    const stats: FetchStats = {};
+    const { results, endedAt } = await runTimed(lowPriority("dz", "zm", "gm"), stats);
+
+    expect(endedAt).toBeLessThanOrEqual(TICK_BUDGET_MS);
+    // dz: three full 60 s timeouts. zm starts at 200 s, its timeout is capped to
+    // the 40 s left, and the 6 s retry wait no longer fits. gm is never sent.
+    expect(sentAt).toEqual([0, 66_000, 138_000, 200_000]);
+    expect(sentAt.every((t) => t < TICK_BUDGET_MS)).toBe(true);
+    expect(results.map((r) => r.code)).toEqual(["dz", "zm", "gm"]);
+    expect(statusOf(stats, "dz")).toBe("timeout");
+    expect(statusOf(stats, "zm")).toBe("timeout"); // it was sent, so it keeps its real status
+    expect(statusOf(stats, "gm")).toBe("deadline_skipped");
+    expect(results.every((r) => r.articles.length === 0 && r.score === null)).toBe(true);
+    expect(console.warn).toHaveBeenCalledWith("[Tick] budget_exhausted stage=fetch skipped=1");
+    // All three are refunded: two timeouts (refunded as ambiguous) and one request never sent.
+    expect(refundCounts(results)).toEqual({ newsdata: 3, gnews: 0 });
+  });
+
+  it("does not retry when the backoff would use up exactly the time left", async () => {
+    // dz's first timeout ends at 60 s with 6 s left and a 6 s backoff. A retry
+    // would be sent at the deadline with a 0 ms timeout - a wasted request.
+    useBudgetTimers();
+    const t0 = Date.now();
+    const sentAt: number[] = [];
+    installFetch({
+      news: (url: string, opts: any) => {
+        sentAt.push(Date.now() - t0);
+        return hang(url, opts);
+      },
+    });
+    const stats: FetchStats = {};
+    const { endedAt } = await runTimed(lowPriority("dz"), stats, 66_000);
+
+    expect(sentAt).toEqual([0]);
+    expect(endedAt).toBe(60_000);
+    expect(statusOf(stats, "dz")).toBe("timeout");
+  });
+
+  it("with budgetMs: 0, sends nothing and marks every country deadline_skipped", async () => {
+    const fetchFn = installFetch({}); // any request would throw "no handler configured"
+    const targets = [...lowPriority("dz", "zm"), { code: "us", name: "United States", lang: "en" }];
+    const stats: FetchStats = {};
+    const results = await fetchCountries(targets, stats, { budgetMs: 0 });
+
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(results).toHaveLength(3);
+    expect(stats.countries!.map((c) => c.status)).toEqual(["deadline_skipped", "deadline_skipped", "deadline_skipped"]);
+    expect(results.every((r) => r.status === "deadline_skipped" && r.articles.length === 0)).toBe(true);
+    // Never sent, so every reserved credit comes back, split by provider.
+    expect(refundCounts(results)).toEqual({ newsdata: 2, gnews: 1 });
+
+    const redis = createFakeRedis();
+    const day = 500;
+    expect(await persistCountries(redis, results, day)).toEqual([]);
+    for (const { code } of targets) {
+      expect(redis._sets.get(`sentiment:done:${day}`)?.has(code) ?? false).toBe(false);
+      expect(redis._zsets.get("sentiment:freshness")?.has(code) ?? false).toBe(false);
+    }
   });
 });

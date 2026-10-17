@@ -2,7 +2,7 @@
 // is the only caller: the read endpoints never touch a provider, which is what
 // keeps user traffic from spending credits.
 
-import { now, since, log, debug, DEBUG } from "./logger.js";
+import { now, since, log, warn, debug, DEBUG } from "./logger.js";
 import type { Article, CountryDef, CountryResult, RawArticle } from "../../shared/types.js";
 
 // utcOffset = standard-time offset (hours) of the country's primary population
@@ -241,6 +241,43 @@ export const HF_MAX_RETRIES = 2; // retries on HF 503 (model loading) / 429 / tr
 export const HF_BACKOFF_BASE_MS = 6000; // first backoff when no Retry-After / estimated_time is present
 export const HF_MAX_BACKOFF_MS = 30000; // cap a single HF wait (a cold-start estimated_time can be large) so a tick can't stall
 
+// The fetch -> translate -> score pipeline must finish inside this, leaving
+// ~60 s of api/cron/refresh.ts's 300 s maxDuration for persistence, the
+// aggregate rebuild and the tick record (all Redis round trips). Every request
+// timeout and retry wait is capped at the time remaining; nothing new starts
+// once it has run out. A request cut short by the cap is a plain timeout -
+// which is already refunded (see the status table in refresh-core.ts), because
+// a request that never completed may or may not have been charged - so the
+// budget introduces no new ledger case.
+export const TICK_BUDGET_MS = 240_000;
+
+// Time left before `deadlineAt`, or Infinity when there is no budget (the eval
+// harness calls translateAll / scoreInChunks without one).
+const remainingUntil = (deadlineAt: number | undefined): number =>
+  deadlineAt === undefined ? Infinity : deadlineAt - Date.now();
+
+// One request's timeout: FETCH_TIMEOUT_MS, or less when the tick's budget ends
+// sooner. Never negative - a 0 ms timer still aborts.
+const requestTimeoutMs = (deadlineAt: number | undefined): number =>
+  Math.max(0, Math.min(FETCH_TIMEOUT_MS, remainingUntil(deadlineAt)));
+
+// Like AbortSignal.timeout, but built on setTimeout so tests can drive it
+// with fake timers (Node's AbortSignal.timeout uses an internal timer they
+// can't reach). Aborts with the same DOMException name, so
+// isRetryableNetworkError and the "timeout" status are unchanged.
+// The timer is deliberately not cleared when fetch resolves: the same signal
+// also bounds the body read (res.text() / res.json()). unref() stops a pending
+// timer from holding the process open.
+function timeoutSignal(ms: number): AbortSignal {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new DOMException("The operation timed out.", "TimeoutError")),
+    ms,
+  );
+  timer.unref?.();
+  return controller.signal;
+}
+
 // Transient connection-layer failures thrown by undici (Node's fetch) - the
 // request never reached an HTTP response, so a quick retry often succeeds.
 const RETRYABLE_NETWORK_CODES = new Set<string>([
@@ -260,8 +297,8 @@ const asStr = (v: unknown): string | null => (typeof v === "string" ? v : null);
 // Pull a named field off a thrown value (Error, DOMException, or a plain object).
 const errField = (e: unknown, field: string): unknown => (isRecord(e) ? e[field] : undefined);
 
-// fetch() rejects with a TypeError whose `cause` carries the real code. An
-// AbortSignal.timeout() firing rejects with a DOMException named "TimeoutError" -
+// fetch() rejects with a TypeError whose `cause` carries the real code. A
+// timeoutSignal() firing rejects with a DOMException named "TimeoutError" -
 // treat that like a transient failure so a slow request retries then gives up.
 export function isRetryableNetworkError(err: unknown): boolean {
   if (errField(err, "name") === "TimeoutError") return true;
@@ -323,17 +360,22 @@ interface RetryResult {
 //   - connection errors (fetch throws): exponential backoff.
 // Returns { res, attempts } on a non-429 HTTP response, or
 //         { res: null, status, attempts } when retries are exhausted.
+// With a `deadlineAt`, each request's timeout is capped at the time remaining,
+// and a retry whose backoff would use up the rest of the budget is not made (it
+// would be sent at the deadline with a 0 ms timeout): the last real failure is
+// returned instead. That request WAS sent, so it keeps its real
+// status (timeout / network_error / rate_limited), never deadline_skipped.
 async function fetchWithRetry(
   url: string,
-  { tag, code, maxRetries, minGapMs, backoffBaseMs }:
-    { tag: string; code: string; maxRetries: number; minGapMs: number; backoffBaseMs: number },
+  { tag, code, maxRetries, minGapMs, backoffBaseMs, deadlineAt }:
+    { tag: string; code: string; maxRetries: number; minGapMs: number; backoffBaseMs: number; deadlineAt?: number },
 ): Promise<RetryResult> {
   let res: Response;
   let attempts: number;
   for (let attempt = 0; ; attempt++) {
     attempts = attempt + 1;
     try {
-      res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      res = await fetch(url, { signal: timeoutSignal(requestTimeoutMs(deadlineAt)) });
     } catch (err) {
       if (!isRetryableNetworkError(err)) throw err;
       const cause = errField(err, "cause");
@@ -344,6 +386,10 @@ async function fetchWithRetry(
         return { res: null, status, attempts };
       }
       const wait = Math.max(minGapMs, backoffBaseMs * 2 ** attempt);
+      if (remainingUntil(deadlineAt) <= wait) {
+        console.error(`[${tag}] ${code}: ${String(errCode)} - tick budget spent, not retrying`);
+        return { res: null, status, attempts };
+      }
       console.warn(`[${tag}] ${code}: ${String(errCode)} - retrying in ${wait}ms (attempt ${attempt + 1}/${maxRetries})`);
       await delay(wait);
       continue;
@@ -355,6 +401,10 @@ async function fetchWithRetry(
     }
     const retryAfter = parseRetryAfter(res.headers.get("retry-after"));
     const wait = Math.max(minGapMs, retryAfter ?? backoffBaseMs * 2 ** attempt);
+    if (remainingUntil(deadlineAt) <= wait) {
+      console.error(`[${tag}] ${code}: HTTP 429 - tick budget spent, not retrying`);
+      return { res: null, status: "rate_limited", attempts };
+    }
     console.warn(`[${tag}] ${code}: HTTP 429 - retrying in ${wait}ms (attempt ${attempt + 1}/${maxRetries})`);
     await delay(wait);
   }
@@ -376,13 +426,14 @@ export function newsDataQuery(country: Pick<FetchTarget, "code" | "lang">): stri
 // Returns { articles, status, latencyMs, attempts } - `status` is a coarse outcome
 // label (ok | empty | unsupported | rate_limited | http_<code> | timeout |
 // network_error | invalid_json | api_error) the caller folds into the run summary.
-async function fetchHeadlines(country: FetchTarget): Promise<FetchOutcome> {
+async function fetchHeadlines(country: FetchTarget, deadlineAt?: number): Promise<FetchOutcome> {
   const { code: countryCode } = country;
   const url = `https://newsdata.io/api/1/latest?${newsDataQuery(country)}&apikey=${process.env.NEWSDATA_API_KEY}`;
   const start = now();
   const { res, status: earlyStatus, attempts } = await fetchWithRetry(url, {
     tag: "NewsData", code: countryCode,
     maxRetries: NEWSDATA_MAX_RETRIES, minGapMs: NEWSDATA_DELAY_MS, backoffBaseMs: NEWSDATA_BACKOFF_BASE_MS,
+    deadlineAt,
   });
   const out = (articles: RawArticle[], status: string): FetchOutcome => ({ articles, status, latencyMs: since(start), attempts });
 
@@ -441,7 +492,7 @@ async function fetchHeadlines(country: FetchTarget): Promise<FetchOutcome> {
 //
 // `country` is a HIGH_PRIORITY_COUNTRIES entry (needs `code` + `lang`). GNews gives
 // no per-article language, so every headline is tagged with `country.lang`.
-async function fetchHeadlinesGNews(country: FetchTarget): Promise<FetchOutcome> {
+async function fetchHeadlinesGNews(country: FetchTarget, deadlineAt?: number): Promise<FetchOutcome> {
   const { code, lang } = country;
   const params = new URLSearchParams({
     category: "general",
@@ -458,6 +509,7 @@ async function fetchHeadlinesGNews(country: FetchTarget): Promise<FetchOutcome> 
   const { res, status: earlyStatus, attempts } = await fetchWithRetry(url, {
     tag: "GNews", code,
     maxRetries: GNEWS_MAX_RETRIES, minGapMs: GNEWS_DELAY_MS, backoffBaseMs: GNEWS_BACKOFF_BASE_MS,
+    deadlineAt,
   });
   const out = (articles: RawArticle[], status: string): FetchOutcome => ({ articles, status, latencyMs: since(start), attempts });
 
@@ -771,15 +823,29 @@ interface FetchedCountry {
   articles: RawArticle[];
 }
 
-type Fetcher = (country: FetchTarget) => Promise<FetchOutcome>;
+type Fetcher = (country: FetchTarget, deadlineAt?: number) => Promise<FetchOutcome>;
 
 // Fetch + score a specific subset of countries. `subset` is a list of
 // { code, name } entries (a slice of COUNTRIES). Returns one enriched country
 // object per input, in input order.
 // The optional `stats` object is filled in place with per-stage timings, counts,
 // and a per-country breakdown for debugging (surfaced in the cron's response).
-export async function fetchCountries(subset: FetchTarget[], stats: FetchStats = {}): Promise<CountryResult[]> {
+// The whole pipeline ends by `budgetMs` after it starts (see TICK_BUDGET_MS).
+export async function fetchCountries(
+  subset: FetchTarget[],
+  stats: FetchStats = {},
+  { budgetMs = TICK_BUDGET_MS }: { budgetMs?: number } = {},
+): Promise<CountryResult[]> {
   const t0 = now();
+  const deadlineAt = t0 + budgetMs;
+  const remaining = () => remainingUntil(deadlineAt);
+  // Once per tick: the first stage that loses work to the budget says so.
+  let budgetLogged = false;
+  const noteBudget = (stage: "fetch" | "translate" | "score", skipped: number) => {
+    if (budgetLogged) return;
+    budgetLogged = true;
+    warn("Tick", "budget_exhausted", { stage, skipped });
+  };
   // Per-country fetch outcome, keyed by code (merged with scores in Phase 5).
   const meta = new Map<string, Meta>();
 
@@ -791,10 +857,22 @@ export async function fetchCountries(subset: FetchTarget[], stats: FetchStats = 
   const fetchBatch = async (countries: FetchTarget[], fetcher: Fetcher, delayMs: number, provider: string): Promise<FetchedCountry[]> => {
     const results: FetchedCountry[] = [];
     for (let i = 0; i < countries.length; i++) {
-      if (i > 0) await delay(delayMs);
+      // The courtesy gap is capped too. If the budget ends inside it, the check
+      // below skips the country, so a shortened gap never sends a request early.
+      if (i > 0) await delay(Math.max(0, Math.min(delayMs, remaining())));
       const { code, name } = countries[i];
+      if (remaining() <= 0) {
+        // Never sent, so its credit is refunded and the next tick retries it.
+        // status does NOT live on the pushed object. FetchedCountry is { code,
+        // name, articles }; the status is read back out of `meta` in Phase 5's
+        // merge step.
+        // `continue`, not `break`: every input still gets exactly one output.
+        meta.set(code, { status: "deadline_skipped", ms: 0, attempts: 0 });
+        results.push({ code, name, articles: [] });
+        continue;
+      }
       try {
-        const { articles, status, latencyMs, attempts } = await fetcher(countries[i]);
+        const { articles, status, latencyMs, attempts } = await fetcher(countries[i], deadlineAt);
         meta.set(code, { status, ms: latencyMs, attempts });
         log(provider, code, { status, ms: latencyMs, art: articles.length, tries: attempts });
         results.push({ code, name, articles });
@@ -821,6 +899,10 @@ export async function fetchCountries(subset: FetchTarget[], stats: FetchStats = 
   ]);
   const fetched = [...gnFetched, ...ndFetched];
   const fetchMs = since(tFetch);
+  const fetchSkipped = [...meta.values()].filter((m) => m.status === "deadline_skipped").length;
+  // A retry abandoned at the deadline skips no country but still spends the
+  // budget, so either signal means it ran out during the fetch.
+  if (fetchSkipped > 0 || remaining() <= 0) noteBudget("fetch", fetchSkipped);
 
   // Phase 2: flatten to individual headlines, all scored by the English model.
   // Each ref carries code + article index so scores and translations can be
