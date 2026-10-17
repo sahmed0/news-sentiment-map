@@ -6,7 +6,7 @@ import { LOCK_KEY } from "../../api/_lib/lock.js";
 // Isolate the cron handler from Redis and the fetch/select/persist pipeline so we
 // test only its orchestration: auth, env guard, lock, branch selection, lock release.
 vi.mock("@upstash/redis", () => ({ Redis: vi.fn() }));
-vi.mock("../../api/_lib/sentiment-fetch.js", () => ({ fetchCountries: vi.fn(), probeScoring: vi.fn() }));
+vi.mock("../../api/_lib/sentiment-fetch.js", () => ({ fetchCountries: vi.fn(), probeScoring: vi.fn(), TICK_BUDGET_MS: 240_000 }));
 vi.mock("../../api/_lib/refresh-core.js", () => ({
   SCORING_DOWN_KEY: "sentiment:scoring:down",
   selectDueCountries: vi.fn(),
@@ -436,7 +436,7 @@ describe("POST /api/cron/refresh - scoring breaker", () => {
     expect(redis._store.has(LOCK_KEY)).toBe(false);
   });
 
-  it("clears the flag and runs the tick once the probe passes", async () => {
+  it("clears the flag and runs the tick on what is left of the budget once the probe passes", async () => {
     const redis = createFakeRedis({ store: { [SCORING_DOWN_KEY]: DOWN_SINCE } });
     vi.mocked(Redis).mockImplementation(function () { return redis as any; });
     vi.mocked(probeScoring).mockResolvedValue(true);
@@ -448,7 +448,9 @@ describe("POST /api/cron/refresh - scoring breaker", () => {
 
     expect(redis._store.has(SCORING_DOWN_KEY)).toBe(false);
     expect(reserveCredits).toHaveBeenCalled();
-    expect(fetchCountries).toHaveBeenCalled();
+    const opts = vi.mocked(fetchCountries).mock.calls[0][2];
+    expect(opts!.budgetMs).toBeGreaterThan(0);
+    expect(opts!.budgetMs).toBeLessThanOrEqual(240_000);
     expect(res.body).toMatchObject({ ok: true, refreshed: ["us"] });
     expect(vi.mocked(recordTick).mock.calls[0][1].error).toBeUndefined();
   });

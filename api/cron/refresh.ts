@@ -6,7 +6,7 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { fetchCountries, probeScoring } from "../_lib/sentiment-fetch.js";
+import { fetchCountries, probeScoring, TICK_BUDGET_MS } from "../_lib/sentiment-fetch.js";
 import { LOCK_KEY, LOCK_RELEASE_LUA } from "../_lib/lock.js";
 import {
   SCORING_DOWN_KEY,
@@ -26,7 +26,9 @@ import type { TickSummary } from "../../shared/types.js";
 // Matches maxDuration (300 s). The TTL frees a lock orphaned by a function that
 // was killed before its finally block ran. If a tick outlives it, a successor may
 // take the lock; the token-checked release ensures this tick never deletes it. A
-// healthy tick releases the lock as soon as it finishes.
+// healthy tick releases the lock as soon as it finishes. In practice a tick
+// doesn't outlive it: fetchCountries ends by TICK_BUDGET_MS (240 s), which keeps
+// a normal tick well inside the TTL.
 const LOCK_TTL = 300; // seconds
 
 // Fluid Compute is enabled, so Hobby allows up to 300 s. We use the full ceiling
@@ -128,8 +130,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Scoring breaker (see SCORING_DOWN_KEY)
+    let fetchOpts: { budgetMs: number } | undefined;
     const downSince = await redis.get<string>(SCORING_DOWN_KEY);
     if (downSince) {
+      const tProbe = now();
       if (!(await probeScoring())) {
         const { count, dupSets, sharedFeed } = await rebuildAggregate(redis);
         warn("Tick", "scoring_down", { since: downSince, ms: since(t0) });
@@ -154,6 +158,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       await redis.del(SCORING_DOWN_KEY);
       log("Tick", "scoring_recovered", { since: downSince });
+      // The probe ran inside this tick's time, so the pipeline gets what is left.
+      fetchOpts = { budgetMs: TICK_BUDGET_MS - since(tProbe) };
     }
 
     // Reserve credits up front so a mid-tick crash can never under-count spend.
@@ -167,7 +173,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       codes: subset.map((c) => c.code).join(","),
     });
     const stats: FetchStats = {};
-    const results = await fetchCountries(subset, stats);
+    const results = fetchOpts ? await fetchCountries(subset, stats, fetchOpts) : await fetchCountries(subset, stats);
     if (stats.scoringFailed) {
       // nx keeps the time the outage was first seen if the flag is somehow still set.
       await redis.set(SCORING_DOWN_KEY, new Date().toISOString(), { nx: true });
