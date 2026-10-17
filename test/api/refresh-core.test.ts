@@ -201,6 +201,52 @@ describe("selectDueCountries", () => {
   });
 });
 
+// "Badly overdue" depends on each country's own cadence. With a flat 30 h
+// threshold, every low-priority country (~48 h stale on its due day, since it's
+// fetched every other day) counted as overdue at 01:00 UTC and was backfilled in
+// the first three ticks instead of at its 6 am-local target.
+describe("selectDueCountries - low-priority target hour", () => {
+  const HOUR_MS = 60 * 60 * 1000;
+
+  // A low-priority country at UTC+2 (target 04:00 UTC), and a 01:00 UTC tick on a
+  // day its cohort is due. 01:00 is when the NewsData day rolls over, which is when
+  // a flat threshold backfills the whole cohort.
+  const LOW_04 = COUNTRIES.find((c) => !HIGH_PRIORITY_CODES.has(c.code) && c.utcOffset === 2)!.code;
+  const AT_01 = [new Date("2024-06-01T01:00:00Z"), new Date("2024-06-02T01:00:00Z")].find((d) =>
+    lowPriorityDueOn(LOW_04, dayIdOf(d))
+  )!;
+  const AT_04 = new Date(AT_01.getTime() + 3 * HOUR_MS);
+  const onlyPending = (code: string, now: Date) =>
+    ({ [`sentiment:done:${dayIdOf(now)}`]: allCodes.filter((c) => c !== code) });
+
+  it("does not backfill a due-cohort country fetched 48 h ago at 01:00; fetches it at its 04:00 target", async () => {
+    const fetchedAt = AT_01.getTime() - 48 * HOUR_MS;
+    const seed = (now: Date) => createFakeRedis({
+      sets: onlyPending(LOW_04, now),
+      zsets: { "sentiment:freshness": { [LOW_04]: fetchedAt } },
+    });
+
+    const early = await selectDueCountries(seed(AT_01), AT_01);
+    expect(early.diag.notDone).toBe(1); // eligible by cadence, just early for its target
+    expect(early.subset).toHaveLength(0);
+
+    const onTarget = await selectDueCountries(seed(AT_04), AT_04);
+    expect(onTarget.subset.map((c) => c.code)).toEqual([LOW_04]);
+    expect(onTarget.diag.tzDue).toBe(1);
+    expect(onTarget.diag.backfill).toBe(0);
+  });
+
+  it("still recovers a genuinely overdue country (60 h stale) early, at 01:00", async () => {
+    const redis = createFakeRedis({
+      sets: onlyPending(LOW_04, AT_01),
+      zsets: { "sentiment:freshness": { [LOW_04]: AT_01.getTime() - 60 * HOUR_MS } },
+    });
+    const sel = await selectDueCountries(redis, AT_01);
+    expect(sel.subset.map((c) => c.code)).toEqual([LOW_04]);
+    expect(sel.diag.backfill).toBe(1);
+  });
+});
+
 describe("reserveCredits", () => {
   it("charges each provider's ledger - NewsData on dayId, GNews on gnDayId", async () => {
     const redis = createFakeRedis();

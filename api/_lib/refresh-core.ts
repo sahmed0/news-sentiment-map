@@ -82,11 +82,14 @@ export const LOW_PRIORITY_DAYS = 2; // countries only in LOW_PRIORITY_COUNTRIES 
 const TARGET_LOCAL_HOUR = 6; // refresh each country near 6 am local time
 // A not-yet-due country (its 6 am-local target hasn't arrived yet today) is only
 // pulled forward by backfill once it's this stale - i.e. it already missed a full
-// daily cycle. Steady-state staleness peaks at ~24 h (one fetch per target), so
-// 30 h leaves a margin: normal timing is driven by the target hour, and backfill
-// only steps in to recover a country that genuinely fell behind. Without this gate
-// backfill fetches every not-done country all day in staleness order, eroding the
-// 6 am-local schedule into "refresh everyone, earliest-due-be-damned".
+// cycle. 30 h is the value for daily countries: they peak at ~24 h stale (one
+// fetch per target), so it leaves a margin. Low-priority countries are fetched
+// every other day, so they're already ~48 h stale when they come due, and
+// selectDueCountries' overdueAfterMs adds the extra days for them. Either way the
+// target hour drives normal timing, and backfill only steps in for a country that
+// genuinely fell behind. Without this gate, backfill fetches every not-done
+// country all day in staleness order, eroding the 6 am-local schedule into
+// "refresh everyone, earliest-due-be-damned".
 const STALE_BACKFILL_MS = 30 * 60 * 60 * 1000;
 const DONE_TTL = 26 * 60 * 60; // 26 h - outlives a NewsData day so the set is whole-day
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -140,8 +143,9 @@ const toInt = (v: unknown): number => {
 //   2. then the stalest remaining not-done countries (backfill - recovers prior
 //      failures and fills empty/sparse hours without wasting budget), EXCEPT
 //      countries still early for their 6 am-local target unless badly overdue
-//      (> STALE_BACKFILL_MS). This keeps backfill from fetching every country
-//      hours before its target and eroding the per-country 6 am-local schedule.
+//      (a full cycle past their own cadence - see overdueAfterMs). This keeps
+//      backfill from fetching every country hours before its target and
+//      eroding the per-country 6 am-local schedule.
 // ...selected per provider against that provider's own remaining budget (GNews
 // for high-priority, NewsData for the rest), so neither API throttles the other.
 // A NEWSDATA_MAX_COUNTRIES env var hard-caps the TOTAL picked so `vercel dev`
@@ -238,10 +242,17 @@ export async function selectDueCountries(redis: RedisLike, now: Date = new Date(
     const target = ((targetUtcHour(c.utcOffset) - dayStartHour) % 24 + 24) % 24;
     return hoursIntoDay < target;
   };
-  // Badly overdue: last terminal attempt was > STALE_BACKFILL_MS ago, or never
-  // (the -1 sentinel sorts below any epoch). Such a country jumped a full cycle, so
+  // "Badly overdue" means a full cycle missed on top of the country's own cadence.
+  // STALE_BACKFILL_MS is sized for daily countries. Low-priority countries are
+  // fetched every other day, so they're ~48 h stale whenever they come due, and a
+  // flat 30 h would mark them all overdue at 01:00 UTC: the whole cohort would be
+  // backfilled in the first three ticks instead of at each one's 6 am-local target.
+  const overdueAfterMs = (c: CountryDef): number =>
+    STALE_BACKFILL_MS + (HIGH_PRIORITY_CODES.has(c.code) ? 0 : (LOW_PRIORITY_DAYS - 1) * DAY_MS);
+  // Badly overdue: last terminal attempt was > overdueAfterMs ago, or never (the
+  // -1 sentinel sorts below any epoch). Such a country jumped a full cycle, so
   // backfill may pull it forward even before its target hour to recover it.
-  const veryStale = (c: CountryDef): boolean => staleness(c) < now.getTime() - STALE_BACKFILL_MS;
+  const veryStale = (c: CountryDef): boolean => staleness(c) < now.getTime() - overdueAfterMs(c);
 
   // Order one provider's eligible countries: timezone-due first (stalest within
   // that), then the stalest of the rest as backfill - but a backfill country that
