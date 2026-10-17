@@ -562,7 +562,7 @@ const azureText = (r: unknown): string => {
   return typeof t[0].text === "string" ? t[0].text : "";
 };
 
-async function translateHeadlines(titles: string[]): Promise<string[] | null> {
+async function translateHeadlines(titles: string[], deadlineAt?: number): Promise<string[] | null> {
   if (!titles.length) return titles;
   const headers: Record<string, string> = {
     "Ocp-Apim-Subscription-Key": process.env.AZURE_TRANSLATOR_KEY ?? "",
@@ -582,7 +582,7 @@ async function translateHeadlines(titles: string[]): Promise<string[] | null> {
         method: "POST",
         headers,
         body: JSON.stringify(titles.map((t) => ({ Text: t }))),
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal: timeoutSignal(requestTimeoutMs(deadlineAt)),
       }
     );
   } catch (e) {
@@ -610,24 +610,49 @@ async function translateHeadlines(titles: string[]): Promise<string[] | null> {
   }
 }
 
-// Exported for the eval harness, which must measure this exact path (batching,
-// the empty-string substitution on Azure failure) and not a reimplementation.
-export async function translateAll(titles: string[]): Promise<string[]> {
+// A stage's output plus how many of its items the tick budget dropped, which
+// fetchCountries needs for its budget_exhausted log line.
+interface Budgeted<T> {
+  out: T[];
+  skipped: number;
+}
+
+async function translateWithin(titles: string[], deadlineAt?: number): Promise<Budgeted<string>> {
   const out: string[] = [];
+  let skipped = 0;
   for (let i = 0; i < titles.length; i += AZURE_BATCH_SIZE) {
     const chunk = titles.slice(i, i + AZURE_BATCH_SIZE);
-    const translated = await translateHeadlines(chunk);
+    // Budget spent: degrade exactly as an Azure failure does, without sending.
+    if (remainingUntil(deadlineAt) <= 0) {
+      out.push(...chunk.map(() => ""));
+      skipped += chunk.length;
+      continue;
+    }
+    const translated = await translateHeadlines(chunk, deadlineAt);
     // On Azure failure, substitute empty strings so HF scores null rather than untranslated text
     out.push(...(translated !== null ? translated : chunk.map(() => "")));
   }
-  return out;
+  return { out, skipped };
 }
 
-async function batchSentimentModel(modelUrl: string, inputs: string[]): Promise<(number | null)[]> {
+// Exported for the eval harness, which must measure this exact path (batching,
+// the empty-string substitution on Azure failure) and not a reimplementation.
+// `deadlineAt` is the tick budget; the eval passes none, so it runs unbounded.
+export async function translateAll(titles: string[], deadlineAt?: number): Promise<string[]> {
+  return (await translateWithin(titles, deadlineAt)).out;
+}
+
+async function batchSentimentModel(modelUrl: string, inputs: string[], deadlineAt?: number): Promise<Budgeted<number | null>> {
   // Skip empty inputs but track original indices so scores align with the input array
   const nonempty = inputs.map((input, i) => ({ i, input })).filter(({ input }) => input.length > 0);
   const scores: (number | null)[] = inputs.map(() => null);
-  if (!nonempty.length) return scores;
+  // `scores` is filled in place on success and left all-null on failure.
+  const done: Budgeted<number | null> = { out: scores, skipped: 0 };
+  // Given up because of the tick budget: the same all-null degrade as any other
+  // failure, but counted so fetchCountries can log it.
+  const outOfBudget: Budgeted<number | null> = { out: scores, skipped: nonempty.length };
+  if (!nonempty.length) return done;
+  if (remainingUntil(deadlineAt) <= 0) return outOfBudget;
 
   const model = modelShortName(modelUrl);
   const start = now();
@@ -654,7 +679,7 @@ async function batchSentimentModel(modelUrl: string, inputs: string[]): Promise<
           inputs: nonempty.map(({ input }) => input),
           parameters: { top_k: null },
         }),
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal: timeoutSignal(requestTimeoutMs(deadlineAt)),
       });
     } catch (e) {
       // Timeout or connection error: retry if transient, else null the batch so
@@ -662,6 +687,10 @@ async function batchSentimentModel(modelUrl: string, inputs: string[]): Promise<
       const status = errField(e, "name") === "TimeoutError" ? "timeout" : "network_error";
       if (isRetryableNetworkError(e) && attempt < HF_MAX_RETRIES) {
         const wait = Math.min(HF_MAX_BACKOFF_MS, HF_BACKOFF_BASE_MS * 2 ** attempt);
+        if (remainingUntil(deadlineAt) <= wait) {
+          log("HF", model, { status, items: nonempty.length, ms: since(start), budget: "spent" });
+          return outOfBudget;
+        }
         console.warn(`[HuggingFace] ${model}: ${status} - retrying in ${wait}ms (attempt ${attempt + 1}/${HF_MAX_RETRIES})`);
         await delay(wait);
         continue;
@@ -669,7 +698,7 @@ async function batchSentimentModel(modelUrl: string, inputs: string[]): Promise<
       const cause = errField(e, "cause");
       log("HF", model, { status, items: nonempty.length, ms: since(start) });
       console.error(`[HuggingFace] request failed: ${String(errField(e, "name") ?? (isRecord(cause) ? cause.code : undefined) ?? e)}`);
-      return scores;
+      return done;
     }
 
     const rawBody = await res.text().catch(() => "");
@@ -689,13 +718,17 @@ async function batchSentimentModel(modelUrl: string, inputs: string[]): Promise<
           }
         }
         wait = Math.min(HF_MAX_BACKOFF_MS, wait ?? HF_BACKOFF_BASE_MS * 2 ** attempt);
+        if (remainingUntil(deadlineAt) <= wait) {
+          log("HF", model, { status: `http_${res.status}`, items: nonempty.length, ms: since(start), budget: "spent" });
+          return outOfBudget;
+        }
         console.warn(`[HuggingFace] ${model}: HTTP ${res.status} - retrying in ${wait}ms (attempt ${attempt + 1}/${HF_MAX_RETRIES})`);
         await delay(wait);
         continue;
       }
       log("HF", model, { status: `http_${res.status}`, items: nonempty.length, ms: since(start) });
       console.error(`[HuggingFace] HTTP ${res.status}: ${rawBody.slice(0, 200)}`);
-      return scores;
+      return done;
     }
 
     try {
@@ -703,19 +736,19 @@ async function batchSentimentModel(modelUrl: string, inputs: string[]): Promise<
     } catch {
       log("HF", model, { status: "invalid_json", items: nonempty.length, ms: since(start) });
       console.error(`[HuggingFace] JSON parse failed: ${rawBody.slice(0, 300)}`);
-      return scores;
+      return done;
     }
 
     if (!Array.isArray(results)) {
       log("HF", model, { status: "bad_shape", items: nonempty.length, ms: since(start) });
       console.error(`[HuggingFace] Unexpected response: ${rawBody.slice(0, 200)}`);
-      return scores;
+      return done;
     }
     break; // success
   }
 
   // Re-narrow after the loop (control-flow narrowing doesn't survive the break).
-  if (!Array.isArray(results)) return scores;
+  if (!Array.isArray(results)) return done;
   // HF returns [{label,score},...] for a single input, [[{label,score},...],...]  for a batch
   const isBatch = Array.isArray(results[0]);
   const normalized: unknown[] = isBatch ? results : [results];
@@ -734,38 +767,38 @@ async function batchSentimentModel(modelUrl: string, inputs: string[]): Promise<
     scores[i] = score;
   });
   log("HF", model, { status: "ok", items: nonempty.length, ms: since(start) });
-  return scores;
+  return done;
+}
+
+async function scoreWithin(modelUrl: string, inputs: string[], deadlineAt?: number): Promise<Budgeted<number | null>> {
+  const out: (number | null)[] = [];
+  let skipped = 0;
+  for (let i = 0; i < inputs.length; i += HF_BATCH_SIZE) {
+    const chunk = inputs.slice(i, i + HF_BATCH_SIZE);
+    const batch = await batchSentimentModel(modelUrl, chunk, deadlineAt);
+    out.push(...batch.out);
+    skipped += batch.skipped;
+  }
+  return { out, skipped };
 }
 
 // Scores every input individually, splitting into HF_BATCH_SIZE-sized requests
 // so a large headline set never exceeds a single payload. Returns one score
 // (or null) per input, aligned to the input array.
-// Exported for the eval harness (same reason as translateAll above).
-export async function scoreInChunks(modelUrl: string, inputs: string[]): Promise<(number | null)[]> {
-  const scores: (number | null)[] = [];
-  for (let i = 0; i < inputs.length; i += HF_BATCH_SIZE) {
-    const chunk = inputs.slice(i, i + HF_BATCH_SIZE);
-    scores.push(...(await batchSentimentModel(modelUrl, chunk)));
-  }
-  return scores;
+// Exported for the eval harness (same reason as translateAll above, and like it
+// runs unbounded when no `deadlineAt` is passed).
+export async function scoreInChunks(modelUrl: string, inputs: string[], deadlineAt?: number): Promise<(number | null)[]> {
+  return (await scoreWithin(modelUrl, inputs, deadlineAt)).out;
 }
 
 // The scoring breaker's probe: one fixed English headline, so neither a news provider
-// nor translation is involved. Gives up after PROBE_TIMEOUT_MS, so a hung scorer
-// can't hold the tick for the full retry cycle.
+// nor translation is involved. Its own PROBE_TIMEOUT_MS deadline caps the request
+// and its retries, so a hung scorer can't eat the tick's budget.
 const PROBE_HEADLINE = "Markets rise after a strong jobs report";
 export const PROBE_TIMEOUT_MS = 30_000;
 export async function probeScoring(): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<null[]>((resolve) => {
-    timer = setTimeout(() => resolve([null]), PROBE_TIMEOUT_MS);
-  });
-  try {
-    const [score] = await Promise.race([batchSentimentModel(HF_ENGLISH_MODEL, [PROBE_HEADLINE]), timedOut]);
-    return typeof score === "number";
-  } finally {
-    clearTimeout(timer);
-  }
+  const { out } = await batchSentimentModel(HF_ENGLISH_MODEL, [PROBE_HEADLINE], Date.now() + PROBE_TIMEOUT_MS);
+  return typeof out[0] === "number";
 }
 
 // A fetch target is a country to refresh. selectDueCountries yields full CountryDef
@@ -803,8 +836,8 @@ export interface FetchStats {
     scored: number;
     score: number | null;
   }>;
-  // True when every headline sent to the scorer came back unscored.
-  // Trips the cron's scoring breaker (see SCORING_DOWN_KEY).
+  // True when every headline sent to the scorer came back unscored for a reason
+  // other than the tick budget. Trips the cron's scoring breaker (see SCORING_DOWN_KEY).
   scoringFailed?: boolean;
 }
 
@@ -924,10 +957,14 @@ export async function fetchCountries(
   // Phase 3a: translate every non-English headline once. The English text is
   // reused both for display and as the scoring input for that headline.
   const tTranslate = now();
-  const translations = toTranslate.length
-    ? await translateAll(toTranslate.map((it) => it.title))
-    : [];
+  const translated = toTranslate.length
+    ? await translateWithin(toTranslate.map((it) => it.title), deadlineAt)
+    : { out: [], skipped: 0 };
+  const translations = translated.out;
   const translateMs = since(tTranslate);
+  // As in the fetch stage: a last request cut short by the deadline skips
+  // nothing but still means the budget ran out here.
+  if (translated.skipped > 0 || remaining() <= 0) noteBudget("translate", translated.skipped);
   const translationByRef = new Map<ScoreRef, string | null>();
   toTranslate.forEach((ref, i) => translationByRef.set(ref, translations[i] || null));
 
@@ -938,12 +975,15 @@ export async function fetchCountries(
   const inputs = scoreItems.map((it) =>
     it.language === "english" ? it.title : (translationByRef.get(it) || "")
   );
-  const scores = scoreItems.length
-    ? await scoreInChunks(HF_ENGLISH_MODEL, inputs)
-    : [];
+  const scored = scoreItems.length
+    ? await scoreWithin(HF_ENGLISH_MODEL, inputs, deadlineAt)
+    : { out: [], skipped: 0 };
+  const scores = scored.out;
   const scoreMs = since(tScore);
-  // Empty inputs (failed translations) aren't sent so they say nothing about the scorer.
-  const sentToScorer = inputs.filter((s) => s.length > 0).length;
+  if (scored.skipped > 0 || remaining() <= 0) noteBudget("score", scored.skipped);
+  // Empty inputs (failed translations) and headlines the budget skipped aren't
+  // sent, so they say nothing about the scorer.
+  const sentToScorer = inputs.filter((s) => s.length > 0).length - scored.skipped;
   const scoringFailed = sentToScorer > 0 && scores.every((s) => s === null);
 
   // Phase 4: write scores + English translations back onto each article (null until set)

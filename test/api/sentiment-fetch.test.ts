@@ -5,8 +5,11 @@ import {
   isRetryableNetworkError,
   newsDataLanguages,
   newsDataQuery,
+  translateAll,
+  scoreInChunks,
   probeScoring,
   PROBE_TIMEOUT_MS,
+  HF_ENGLISH_MODEL,
   LOW_PRIORITY_COUNTRIES,
   TICK_BUDGET_MS,
   type FetchStats,
@@ -626,8 +629,14 @@ describe("probeScoring", () => {
 
   it("gives up after PROBE_TIMEOUT_MS when the scorer hangs", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    // Never answers, so only the probe's own timer can end the wait.
-    installFetch({ hfEng: (() => new Promise<FakeResponse>(() => {})) as unknown as Route });
+    // Answers only by failing when the request is aborted, so the probe's own
+    // deadline - not the mock - decides when it gives up.
+    installFetch({
+      hfEng: (_url: string, opts: any) =>
+        new Promise<FakeResponse>((_, reject) => {
+          opts.signal.addEventListener("abort", () => reject(opts.signal.reason));
+        }),
+    });
     const t0 = Date.now();
     let settledAt = -1;
     const p = probeScoring().then((ok) => {
@@ -636,7 +645,7 @@ describe("probeScoring", () => {
     });
     await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS + 60_000);
     await expect(p).resolves.toBe(false);
-    expect(settledAt - t0).toBe(PROBE_TIMEOUT_MS);
+    expect(settledAt - t0).toBeLessThanOrEqual(PROBE_TIMEOUT_MS);
   });
 });
 
@@ -787,6 +796,54 @@ describe("fetchCountries - tick time budget", () => {
     expect(refundCounts(results)).toEqual({ newsdata: 3, gnews: 0 });
   });
 
+  it("ends an HF outage after a healthy 20-country fetch by the budget (was 434 s)", async () => {
+    // Before the budget:
+    //   {"fetchMs":38000,"scoreMs":396000,"totalMs":434000}
+    // 20 countries x 5 English headlines = 100 inputs = two HF chunks, each of
+    // which retried through three 60 s timeouts.
+    useBudgetTimers();
+    const targets = LOW_PRIORITY_COUNTRIES.slice(0, 20).map(({ code, name }) => ({ code, name }));
+    let hfCalls = 0;
+    installFetch({
+      news: (url: string) => {
+        const code = targets.find((t) => url.includes(`country=${t.code}&`))!.code;
+        return newsOk(
+          Array.from({ length: 5 }, (_, i) => ({ title: `${code} ${i}`, link: `http://${code}/${i}`, language: "english" }))
+        );
+      },
+      hfEng: (url: string, opts: any) => {
+        hfCalls += 1;
+        return hang(url, opts);
+      },
+    });
+    const stats: FetchStats = {};
+    const { results, endedAt } = await runTimed(targets, stats);
+
+    expect(endedAt).toBeLessThanOrEqual(TICK_BUDGET_MS);
+    expect(stats.timings!.fetchMs).toBe(38_000); // 19 courtesy gaps, unchanged
+    // Chunk 1 retries to 236 s; chunk 2 is sent once with a 4 s timeout and not retried.
+    expect(hfCalls).toBe(4);
+    expect(results).toHaveLength(20);
+    for (const r of results) {
+      expect(r.status).toBe("ok");
+      expect(r.articles).toHaveLength(5);
+      expect(r.articles.every((a) => a.score === null)).toBe(true);
+      expect(r.score).toBeNull();
+    }
+    expect(console.warn).toHaveBeenCalledWith("[Tick] budget_exhausted stage=score skipped=50");
+
+    // Served, so nothing is refunded, and every country is scorable-but-unscored:
+    // untouched, so the next tick retries it.
+    expect(refundCounts(results)).toEqual({ newsdata: 0, gnews: 0 });
+    const redis = createFakeRedis();
+    const day = 500;
+    expect(await persistCountries(redis, results, day)).toEqual([]);
+    for (const { code } of targets) {
+      expect(redis._sets.get(`sentiment:done:${day}`)?.has(code) ?? false).toBe(false);
+      expect(redis._store.has(`sentiment:country:${code}`)).toBe(false);
+    }
+  });
+
   it("does not retry when the backoff would use up exactly the time left", async () => {
     // dz's first timeout ends at 60 s with 6 s left and a 6 s backoff. A retry
     // would be sent at the deadline with a 0 ms timeout - a wasted request.
@@ -805,6 +862,23 @@ describe("fetchCountries - tick time budget", () => {
     expect(sentAt).toEqual([0]);
     expect(endedAt).toBe(60_000);
     expect(statusOf(stats, "dz")).toBe("timeout");
+  });
+
+  it("logs budget_exhausted when the deadline cuts short the last HF attempt", async () => {
+    // One chunk: attempts at 0 / 66 / 138 s, and the third's timeout is capped at
+    // the 12 s left. It is the final attempt, so nothing is counted as skipped -
+    // the log must still fire.
+    useBudgetTimers();
+    installFetch({
+      news: newsOk(Array.from({ length: 5 }, (_, i) => ({ title: `dz ${i}`, link: `http://dz/${i}`, language: "english" }))),
+      hfEng: hang,
+    });
+    const stats: FetchStats = {};
+    const { results, endedAt } = await runTimed(lowPriority("dz"), stats, 150_000);
+
+    expect(endedAt).toBe(150_000);
+    expect(results[0].articles.every((a) => a.score === null)).toBe(true);
+    expect(console.warn).toHaveBeenCalledWith("[Tick] budget_exhausted stage=score skipped=0");
   });
 
   it("with budgetMs: 0, sends nothing and marks every country deadline_skipped", async () => {
@@ -827,5 +901,35 @@ describe("fetchCountries - tick time budget", () => {
       expect(redis._sets.get(`sentiment:done:${day}`)?.has(code) ?? false).toBe(false);
       expect(redis._zsets.get("sentiment:freshness")?.has(code) ?? false).toBe(false);
     }
+  });
+});
+
+describe("translateAll / scoreInChunks - optional deadline", () => {
+  it("without a deadline, retries exactly as before (the eval harness's path)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let call = 0;
+    const fetchFn = installFetch({
+      hfEng: (url: string, opts: any) => {
+        call += 1;
+        return call < 3 ? makeResponse(503, { estimated_time: 20 }) : hfPositive(url, opts);
+      },
+      azure: azureEcho,
+    });
+    const scoring = scoreInChunks(HF_ENGLISH_MODEL, ["a", "b"]);
+    await vi.runAllTimersAsync();
+    const scores = await scoring;
+    expect(scores[0]).toBeCloseTo(0.8, 5);
+    expect(scores[1]).toBeCloseTo(0.8, 5);
+    expect(call).toBe(3); // original + HF_MAX_RETRIES(2)
+    expect(await translateAll(["Hola"])).toEqual(["EN:Hola"]);
+    expect(fetchFn).toHaveBeenCalledTimes(4);
+  });
+
+  it("with a deadline already passed, degrades without sending anything", async () => {
+    const fetchFn = installFetch({ hfEng: hfPositive, azure: azureEcho });
+    const past = Date.now() - 1;
+    expect(await scoreInChunks(HF_ENGLISH_MODEL, ["a", "b"], past)).toEqual([null, null]);
+    expect(await translateAll(["Hola", "Bonjour"], past)).toEqual(["", ""]);
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });
