@@ -15,6 +15,7 @@ import {
   isRefundableStatus,
   rebuildAggregate,
   lowPriorityDueOn,
+  targetUtcHour,
   HISTORY_KEY,
   HISTORY_MAX_DAYS,
   recordTick,
@@ -244,6 +245,45 @@ describe("selectDueCountries - low-priority target hour", () => {
     const sel = await selectDueCountries(redis, AT_01);
     expect(sel.subset.map((c) => c.code)).toEqual([LOW_04]);
     expect(sel.diag.backfill).toBe(1);
+  });
+
+  describe("14-day simulation from a cold start", () => {
+    beforeEach(() => {
+      // persistCountries stamps freshness with Date.now(), so the clock must follow the tick.
+      vi.useFakeTimers({ toFake: ["Date"] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("fetches every country at its target hour once converged (days 10-13)", async () => {
+      const redis = createFakeRedis();
+      const start = Date.parse("2024-06-01T00:00:00Z");
+      const fetches: { code: string; day: number; hour: number }[] = [];
+
+      for (let t = 0; t < 14 * 24; t++) {
+        const now = new Date(start + t * HOUR_MS);
+        vi.setSystemTime(now);
+        const sel = await selectDueCountries(redis, now);
+        await reserveCredits(redis, sel.counts, sel);
+        const results = sel.subset.map((c) => ({ code: c.code, score: 0.1, articles: [{ title: "a", score: 0.1 }] }));
+        await persistCountries(redis, results, sel.dayId);
+        for (const c of sel.subset) fetches.push({ code: c.code, day: Math.floor(t / 24), hour: now.getUTCHours() });
+      }
+
+      const byCode = new Map(COUNTRIES.map((c) => [c.code, c]));
+      const late = fetches.filter((f) => f.day >= 10);
+      const lowLate = late.filter((f) => !HIGH_PRIORITY_CODES.has(f.code));
+      const highLate = late.filter((f) => HIGH_PRIORITY_CODES.has(f.code));
+      const offTarget = late.filter((f) => f.hour !== targetUtcHour(byCode.get(f.code)!.utcOffset));
+      // Check the counts too, so the test can't pass by fetching too little: over
+      // four days each low-priority country should come up exactly twice and each
+      // daily country four times. A missing cohort or skipped day fails here
+      // instead of just making offTarget shorter.
+      expect(lowLate).toHaveLength(2 * (COUNTRIES.length - HIGH_PRIORITY_CODES.size));
+      expect(highLate).toHaveLength(4 * HIGH_PRIORITY_CODES.size);
+      expect(offTarget).toEqual([]);
+    });
   });
 });
 

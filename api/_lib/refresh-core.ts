@@ -129,8 +129,8 @@ export const lowPriorityDueOn = (code: string, day: number): boolean =>
   ((day % LOW_PRIORITY_DAYS) + LOW_PRIORITY_DAYS) % LOW_PRIORITY_DAYS ===
   LOW_PRIORITY_PHASE.get(code);
 
-// UTC hour at which a country's local time is ~TARGET_LOCAL_HOUR.
-const targetUtcHour = (utcOffset: number): number =>
+// UTC hour at which a country's local time is ~TARGET_LOCAL_HOUR. Exported for tests.
+export const targetUtcHour = (utcOffset: number): number =>
   ((TARGET_LOCAL_HOUR - utcOffset) % 24 + 24) % 24;
 
 const toInt = (v: unknown): number => {
