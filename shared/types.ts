@@ -183,6 +183,11 @@ export interface StoredHistoryPoint {
   d: number; // day bucket (the NewsData-shifted dayId), also the zset score
   s: number; // score, rounded to 3 dp
   n: number; // number of scored headlines behind `s`
+  // Sample SD of those headline scores, rounded to 3 dp. OPTIONAL because points
+  // written before this field existed will never have it - headlines are not
+  // retained, so those days cannot be backfilled and must render without an
+  // interval rather than with an invented one.
+  sd?: number;
 }
 
 // Narrow one raw ZSET member into a StoredHistoryPoint. The value arrives either
@@ -200,9 +205,15 @@ export function parseHistoryPoint(v: unknown): StoredHistoryPoint | null {
     }
   }
   if (!isRecord(parsed)) return null;
-  const { d, s, n } = parsed;
+  const { d, s, n, sd } = parsed;
   if (!Number.isFinite(d) || !Number.isFinite(s) || !Number.isFinite(n)) return null;
-  return { d: Number(d), s: Number(s), n: Number(n) };
+  const point: StoredHistoryPoint = { d: Number(d), s: Number(s), n: Number(n) };
+  // Absent is the legacy shape and still parses; present but not a finite number
+  // means the member itself is corrupt, so it is dropped like any other.
+  if (sd === undefined) return point;
+  if (!Number.isFinite(sd)) return null;
+  point.sd = Number(sd);
+  return point;
 }
 
 // Narrow an untyped Redis value into a WorldHistory, or null when it can't be

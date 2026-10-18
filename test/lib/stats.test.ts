@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { headlineStats } from "../../shared/stats.js";
+import { parseHistoryPoint } from "../../shared/types.js";
 
 describe("headlineStats", () => {
   it("returns null for no scores - no mean is not a mean of zero", () => {
@@ -28,5 +29,32 @@ describe("headlineStats", () => {
   it("skips nulls interleaved with scores instead of counting them as zero", () => {
     const s = headlineStats([null, 0.2, undefined, 0.4, null, 0.6, 0.8])!;
     expect(s).toEqual(headlineStats([0.2, 0.4, 0.6, 0.8]));
+  });
+});
+
+describe("parseHistoryPoint", () => {
+  it("parses the legacy shape with no sd, without inventing one", () => {
+    const p = parseHistoryPoint(JSON.stringify({ d: 500, s: 0.1, n: 5 }));
+    expect(p).toEqual({ d: 500, s: 0.1, n: 5 });
+    expect(p).not.toHaveProperty("sd");
+  });
+
+  it("keeps sd when it is stored, from a string or an already-parsed object", () => {
+    expect(parseHistoryPoint(JSON.stringify({ d: 500, s: 0.1, n: 5, sd: 0.42 }))).toEqual({ d: 500, s: 0.1, n: 5, sd: 0.42 });
+    expect(parseHistoryPoint({ d: 500, s: 0.1, n: 5, sd: 0 })).toEqual({ d: 500, s: 0.1, n: 5, sd: 0 });
+  });
+
+  it.each([
+    ["null", null],
+    ["a string", "0.4"],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+  ])("drops a point whose sd is present but %s", (_label, sd) => {
+    expect(parseHistoryPoint({ d: 500, s: 0.1, n: 5, sd })).toBeNull();
+  });
+
+  it("still requires d, s and n to be finite", () => {
+    expect(parseHistoryPoint({ d: 500, s: 0.1, sd: 0.2 })).toBeNull();
+    expect(parseHistoryPoint("not json")).toBeNull();
   });
 });
