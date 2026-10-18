@@ -51,6 +51,9 @@ export interface HistoryPoint {
   date: string; // "YYYY-MM-DD"
   score: number;
   n: number;
+  // Sample SD of that day's headline scores. Absent on days stored before it
+  // was recorded - those render without an interval.
+  sd?: number;
 }
 export interface HistoryResponse {
   code: string;

@@ -87,6 +87,21 @@ describe("GET /api/history", () => {
     expect(res.headers["Cache-Control"]).toBe("public, s-maxage=3600, stale-while-revalidate=86400");
   });
 
+  it("serves sd on days that stored it and omits it on legacy days", async () => {
+    const fake = seedRedis({
+      [point(DAY, 0.25, 4)]: DAY, // written before sd existed
+      [JSON.stringify({ d: DAY + 1, s: -0.5, n: 5, sd: 0.321 })]: DAY + 1,
+    });
+    vi.mocked(Redis).mockImplementation(function () { return fake as any; });
+    const res = mockRes();
+    await call(res, { code: "us" });
+    expect(res.body.points).toEqual([
+      { date: "2024-10-04", score: 0.25, n: 4 },
+      { date: "2024-10-05", score: -0.5, n: 5, sd: 0.321 },
+    ]);
+    expect(res.body.points[0]).not.toHaveProperty("sd"); // not even sd: undefined
+  });
+
   it("returns the last 30 points when the series is longer", async () => {
     const members: Record<string, number> = {};
     for (let i = 0; i < 45; i++) members[point(DAY + i, i / 100, 1)] = DAY + i;

@@ -51,7 +51,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const points: HistoryPoint[] = (members ?? [])
     .map(parseHistoryPoint)
     .filter((p): p is NonNullable<typeof p> => p !== null)
-    .map((p) => ({ date: bucketToDate(p.d), score: p.s, n: p.n }));
+    // `sd` only when stored, so a legacy day reaches the panel without one.
+    .map((p) => ({ date: bucketToDate(p.d), score: p.s, n: p.n, ...(p.sd !== undefined && { sd: p.sd }) }));
 
   // History gains at most one point a day, so an hour at the edge is cheap and
   // the long stale-while-revalidate window keeps it serving through an outage.
