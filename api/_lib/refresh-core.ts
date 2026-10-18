@@ -25,7 +25,8 @@
 import { COUNTRIES, HIGH_PRIORITY_CODES, LOW_PRIORITY_COUNTRIES } from "./sentiment-fetch.js";
 import { log } from "./logger.js";
 import { parseCountryResult, parseHistoryPoint, parseWorldHistory } from "../../shared/types.js";
-import type { CountryDef, CountryResult, ProviderCounts, RedisLike, Selection, TickSummary, WorldHistory } from "../../shared/types.js";
+import type { CountryDef, CountryResult, ProviderCounts, RedisLike, Selection, StoredHistoryPoint, TickSummary, WorldHistory } from "../../shared/types.js";
+import { headlineStats } from "../../shared/stats.js";
 
 export const AGG_KEY = "sentiment:world";
 const COUNTRY_KEY = (code: string): string => `sentiment:country:${code}`;
@@ -435,11 +436,18 @@ export async function persistCountries(redis: RedisLike, results: readonly Persi
       // a second run on the same day would otherwise add a SECOND member at the
       // same zset score - clear the day's range first to keep the write
       // idempotent, then trim to the newest HISTORY_MAX_DAYS.
-      const point = {
+      const point: StoredHistoryPoint = {
         d: day,
         s: Math.round(score * 1000) / 1000,
         n: articles.filter((a) => typeof a.score === "number").length,
       };
+      // Same headlineStats that produced `score` in sentiment-fetch, so the
+      // stored spread describes the stored mean. Not null for real results (the
+      // score came from at least one numeric article score), but PersistResult's
+      // type allows a numeric score over unscored articles - then omit sd rather
+      // than invent one.
+      const hs = headlineStats(articles.map((a) => a.score));
+      if (hs) point.sd = Math.round(hs.sd * 1000) / 1000;
       p.zremrangebyscore(HISTORY_KEY(c.code), day, day);
       p.zadd(HISTORY_KEY(c.code), { score: day, member: JSON.stringify(point) });
       p.zremrangebyrank(HISTORY_KEY(c.code), 0, -(HISTORY_MAX_DAYS + 1));

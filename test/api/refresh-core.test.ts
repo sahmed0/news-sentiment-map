@@ -26,7 +26,8 @@ import {
 } from "../../api/_lib/refresh-core.js";
 import { COUNTRIES, HIGH_PRIORITY_CODES } from "../../api/_lib/sentiment-fetch.js";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
-import { parseTickSummary } from "../../shared/types.js";
+import { parseHistoryPoint, parseTickSummary } from "../../shared/types.js";
+import { headlineStats } from "../../shared/stats.js";
 import type { CountryResult, TickSummary } from "../../shared/types.js";
 
 const dayIdOf = (now: Date) => Math.floor((now.getTime() - NEWSDATA_DAY_OFFSET_MS) / DAY_MS);
@@ -436,7 +437,7 @@ describe("persistCountries history", () => {
   const series = (redis: ReturnType<typeof createFakeRedis>, code: string) =>
     [...(redis._zsets.get(HISTORY_KEY(code)) ?? new Map<string, number>()).entries()]
       .sort((a, b) => a[1] - b[1])
-      .map(([member]) => JSON.parse(member) as { d: number; s: number; n: number });
+      .map(([member]) => JSON.parse(member) as { d: number; s: number; n: number; sd?: number });
 
   it("writes one point per scored country, rounded to 3 dp, counting scored headlines", async () => {
     const redis = createFakeRedis();
@@ -451,8 +452,33 @@ describe("persistCountries history", () => {
       ],
       500
     );
-    expect(series(redis, "us")).toEqual([{ d: 500, s: 0.123, n: 2 }]); // 3rd article unscored
+    // 3rd article unscored. sd of [0.5, -0.25]: both 0.375 from their mean,
+    // so sqrt(2 * 0.140625 / 1) = 0.530.
+    expect(series(redis, "us")).toEqual([{ d: 500, s: 0.123, n: 2, sd: 0.53 }]);
     expect(redis._zsets.get(HISTORY_KEY("us"))!.size).toBe(1);
+  });
+
+  it("stores an sd that describes the same scores as the stored mean", async () => {
+    // Pins persist's side of the contract: `sd` and `n` come from the same
+    // articles, nulls interleaved, as the mean it was handed. `score` is supplied
+    // as headlineStats' mean here, so the `s` check only guards rounding; that
+    // sentiment-fetch really produces that mean is covered end to end by the
+    // partial-HF-failure test in sentiment-fetch.test.ts.
+    const articles = [
+      { title: "a", score: 0.61 },
+      { title: "b", score: null },
+      { title: "c", score: -0.2 },
+      { title: "d", score: 0.05 },
+      { title: "e", score: null },
+    ];
+    const stats = headlineStats(articles.map((a) => a.score))!;
+    const redis = createFakeRedis();
+    await persistCountries(redis, [{ code: "us", score: stats.mean, articles }], 500);
+    const [point] = series(redis, "us");
+    expect(point.s).toBe(Math.round(stats.mean * 1000) / 1000);
+    expect(point.sd).toBe(Math.round(stats.sd * 1000) / 1000);
+    expect(point.n).toBe(stats.n);
+    expect(parseHistoryPoint(JSON.stringify(point))).toEqual(point); // round-trips
   });
 
   it("replaces the same day's point on a re-run instead of piling up", async () => {
@@ -460,7 +486,7 @@ describe("persistCountries history", () => {
     const day = 500;
     await persistCountries(redis, [{ code: "us", score: 0.2, articles: [{ title: "a", score: 0.2 }] }], day);
     await persistCountries(redis, [{ code: "us", score: -0.4, articles: [{ title: "a", score: -0.4 }] }], day);
-    expect(series(redis, "us")).toEqual([{ d: day, s: -0.4, n: 1 }]); // one member, latest wins
+    expect(series(redis, "us")).toEqual([{ d: day, s: -0.4, n: 1, sd: 0 }]); // one member, latest wins
   });
 
   it("caps the series at HISTORY_MAX_DAYS, dropping the oldest day", async () => {

@@ -722,7 +722,9 @@ describe("fetchCountries - partial HuggingFace batch failure", () => {
     expect(refreshed).not.toContain(lost);
 
     const [point] = (await redis.zrange(HISTORY_KEY(split), 0, -1)) as string[];
-    expect(JSON.parse(point)).toEqual({ d: day, s: 0.1, n: 2 });
+    // sd over the same two scores as `s`: 0.8 and -0.6, each 0.7 from the mean,
+    // so sqrt(2 * 0.49 / 1) = 0.990. The nulls count toward neither.
+    expect(JSON.parse(point)).toEqual({ d: day, s: 0.1, n: 2, sd: 0.99 });
 
     expect(redis._store.has(`sentiment:country:${lost}`)).toBe(false);
     expect(redis._zsets.get("sentiment:freshness")!.has(lost)).toBe(false);

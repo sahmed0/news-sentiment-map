@@ -3,6 +3,7 @@
 // keeps user traffic from spending credits.
 
 import { now, since, log, warn, debug, DEBUG } from "./logger.js";
+import { headlineStats } from "../../shared/stats.js";
 import type { Article, CountryDef, CountryResult, RawArticle } from "../../shared/types.js";
 
 // utcOffset = standard-time offset (hours) of the country's primary population
@@ -1008,8 +1009,10 @@ export async function fetchCountries(
       score: cScores[idx] ?? null,
       translatedTitle: trans[idx] ?? null, // English translation, or null when not needed
     }));
-    const valid = cScores.filter((s): s is number => typeof s === "number");
-    const avg = valid.length ? valid.reduce((sum, s) => sum + s, 0) / valid.length : null;
+    // The same function persistCountries uses for the stored spread, so a
+    // history point's `s` and `sd` always describe one set of scores.
+    const hs = headlineStats(cScores);
+    const avg = hs ? hs.mean : null;
 
     // Per-headline detail is the noisiest output - only when DEBUG_PIPELINE=1.
     if (DEBUG) {
@@ -1024,7 +1027,7 @@ export async function fetchCountries(
       status: m?.status,
       ms: m?.ms,
       articles: articles.length,
-      scored: valid.length,
+      scored: hs ? hs.n : 0,
       score: avg === null ? null : Number(avg.toFixed(3)),
     });
 
