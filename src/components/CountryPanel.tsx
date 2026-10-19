@@ -233,10 +233,9 @@ function HistoryCaption({ points }: { points: HistoryPoint[] }) {
   );
 }
 
-// Daily history for one country. It arrives after the panel is already on
-// screen, so nothing renders until it resolves.
-function HistorySection({ code }: { code: string }) {
-  const { points, loading } = useCountryHistory(code);
+// Daily history for one country, fetched by CountryPanel. It arrives after
+// the panel is on screen, so nothing renders until it resolves.
+function HistorySection({ points, loading }: { points: HistoryPoint[]; loading: boolean }) {
   if (loading) return null;
 
   const enough = points.length >= MIN_HISTORY_POINTS;
@@ -279,6 +278,7 @@ export function CountryPanel({ country, onClose, historical }: CountryPanelProps
   const dragControls = useDragControls();
   const reducedMotion = useReducedMotion();
   const edge = edgeMotion(!!reducedMotion, isMobile ? "y" : "x", "100%");
+  const history = useCountryHistory(country?.code ?? null);
   const motionProps: MotionProps = isMobile
     ? {
         ...edge,
@@ -351,7 +351,7 @@ export function CountryPanel({ country, onClose, historical }: CountryPanelProps
 
           {/* Daily sentiment history - absent until the country has been
               scored on enough days. */}
-          <HistorySection code={country.code} />
+          <HistorySection points={history.points} loading={history.loading} />
 
           {/* Headlines are only stored for the current day, so a past day shows
           this note instead. */}
