@@ -13,6 +13,17 @@ export function sentimentBucket(score: unknown): SentimentBucket | null {
   return "neutral";
 }
 
+const BUCKET_ORDER: readonly SentimentBucket[] = ["negative", "neutral", "positive"];
+
+// Sentiment buckets covered by score ± se, ordered negative to positive.
+// More than one bucket means the score's label is uncertain.
+export function bucketsWithinOneSE(score: number, se: number): SentimentBucket[] {
+  const at = (s: number) => BUCKET_ORDER.indexOf(sentimentBucket(s)!);
+  // With no usable spread (0, negative or NaN), return only the score's own bucket.
+  if (!(se > 0)) return [BUCKET_ORDER[at(score)]];
+  return BUCKET_ORDER.slice(at(score - se), at(score + se) + 1);
+}
+
 export const BUCKET_COLOR: Record<SentimentBucket, string> = {
   positive: "rgb(var(--c-positive-rgb))",
   neutral: "rgb(var(--c-neutral-rgb))",

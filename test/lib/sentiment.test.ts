@@ -4,6 +4,7 @@ import {
   scoreColor,
   legendGradientCss,
   bucketColor,
+  bucketsWithinOneSE,
 } from "../../src/lib/sentiment.js";
 
 // d3-scale returns interpolated colors as "rgb(r, g, b)" even when the range was
@@ -87,5 +88,34 @@ describe("bucketColor", () => {
   it("returns null for unscored / non-numeric input", () => {
     expect(bucketColor(null)).toBeNull();
     expect(bucketColor(undefined)).toBeNull();
+  });
+});
+
+describe("bucketsWithinOneSE", () => {
+  it("returns only the score's own bucket when there is no spread", () => {
+    expect(bucketsWithinOneSE(0.05, 0)).toEqual(["neutral"]);
+    expect(bucketsWithinOneSE(-0.5, -0.2)).toEqual(["negative"]);
+    expect(bucketsWithinOneSE(0.5, Number.NaN)).toEqual(["positive"]);
+  });
+
+  it("treats a score exactly on +/-0.1 as neutral, matching sentimentBucket", () => {
+    expect(bucketsWithinOneSE(0.1, 0)).toEqual(["neutral"]);
+    expect(bucketsWithinOneSE(-0.1, 0)).toEqual(["neutral"]);
+    expect(bucketsWithinOneSE(0.1, 0.05)).toEqual(["neutral", "positive"]);
+    expect(bucketsWithinOneSE(-0.1, 0.05)).toEqual(["negative", "neutral"]);
+  });
+
+  it("spans two buckets when the interval crosses one boundary, in either direction", () => {
+    expect(bucketsWithinOneSE(-0.2, 0.15)).toEqual(["negative", "neutral"]);
+    expect(bucketsWithinOneSE(0.2, 0.15)).toEqual(["neutral", "positive"]);
+  });
+
+  it("stays in one bucket when the interval sits comfortably inside it", () => {
+    expect(bucketsWithinOneSE(0.8, 0.05)).toEqual(["positive"]);
+    expect(bucketsWithinOneSE(0, 0.05)).toEqual(["neutral"]);
+  });
+
+  it("includes neutral when a non-neutral score's interval runs from negative to positive", () => {
+    expect(bucketsWithinOneSE(-0.15, 0.3)).toEqual(["negative", "neutral", "positive"]);
   });
 });
