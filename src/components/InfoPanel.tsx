@@ -99,7 +99,7 @@ export function InfoPanel({ open, onClose }: InfoPanelProps) {
                 Data pipeline
               </h3>
               <p>
-                Up to 5 of the most popular news headlines are fetched per country. High priority
+                Up to 5 news headlines are fetched per country. High priority
                 countries use{" "}
                 <a
                   href="https://gnews.io"
@@ -118,7 +118,7 @@ export function InfoPanel({ open, onClose }: InfoPanelProps) {
                 >
                   NewsData.io
                 </a>
-                {" "}for broader global coverage. Non-English headlines are translated via{" "}
+                {" "}for broader global coverage, taking its most recent headlines. Non-English headlines are translated via{" "}
                 <a
                   href="https://azure.microsoft.com/en-us/services/cognitive-services/translator/"
                   target="_blank"
@@ -127,7 +127,7 @@ export function InfoPanel({ open, onClose }: InfoPanelProps) {
                 >
                   Microsoft Azure Translator
                 </a>
-                {" "} before scoring. Scoring is done by a fine-tuned sentiment model. Results are fetched around 6 A.M. ± 2 hours local time for each country and cached in Redis. A Vercel serverless function is triggered to fetch the cached results from the Redis database every time the user opens or refreshes the website.
+                {" "} before scoring. Scoring is done by a fine-tuned sentiment model. High priority countries are refreshed daily and the rest every other day, each on the hourly run nearest 6 A.M. its local time; any country that misses its slot is picked up by a staleness backfill. Results are stored in Redis. Page loads are served from Vercel's edge cache, which falls through to a serverless function that reads Redis when the cache is cold.
               </p>
             </section>
 

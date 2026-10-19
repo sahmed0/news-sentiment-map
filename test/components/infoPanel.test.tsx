@@ -20,4 +20,17 @@ describe("InfoPanel", () => {
     expect(body.textContent).toContain("up to 3 days");
     expect(body.textContent).toContain("only kept for the current day");
   });
+
+  it("describes the pipeline the code actually runs", () => {
+    render(<InfoPanel open={true} onClose={() => {}} />);
+    const pipeline = screen.getByText(/news headlines are fetched per country/).textContent ?? "";
+
+    expect(pipeline).toContain("Up to 5 news headlines");
+    expect(pipeline).toContain("GNews (which ranks stories by popularity)");
+    expect(pipeline).toContain("most recent headlines");
+    expect(pipeline).not.toContain("most popular news headlines");
+    expect(pipeline).not.toContain("± 2 hours");
+    expect(pipeline).toContain("staleness backfill");
+    expect(pipeline).toContain("edge cache");
+  });
 });
