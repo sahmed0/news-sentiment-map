@@ -145,7 +145,7 @@ export function InfoPanel({ open, onClose }: InfoPanelProps) {
                 >
                   cardiffnlp RoBERTa model
                 </a>{" "}
-                The model is trained on 124 million tweets in the English language, and is excellent at identifying sentiment in short text snippets. Scores range from -1 (most negative) to +1 (most positive), with a ±0.1 neutral zone. A country's displayed score is the average across its scored headlines.
+                The model is trained on 124 million tweets in the English language, and is excellent at identifying sentiment in short text snippets. Scores range from -1 (most negative) to +1 (most positive), with a ±0.1 neutral zone. A country's displayed score is the mean of its headline scores, and with so few headlines it carries a standard error of roughly ±0.19.
               </p>
             </section>
 

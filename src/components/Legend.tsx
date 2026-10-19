@@ -67,6 +67,9 @@ export function LegendContent({ data, lastUpdated, fromCache }: LegendContentPro
           <span>Neutral</span>
           <span>Positive</span>
         </div>
+        <p className="opacity-60 leading-snug mt-1.5">
+          Each country is shaded by the mean of up to 5 headlines, which carries a sampling error of roughly ±0.19 - about as wide as the whole neutral band.
+        </p>
       </div>
 
       {/* Top/bottom countries */}

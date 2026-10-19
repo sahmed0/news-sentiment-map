@@ -33,4 +33,11 @@ describe("InfoPanel", () => {
     expect(pipeline).toContain("staleness backfill");
     expect(pipeline).toContain("edge cache");
   });
+
+  it("states the score's standard error in the sentiment section", () => {
+    render(<InfoPanel open={true} onClose={() => {}} />);
+    expect(screen.getByText(/cardiffnlp/, { selector: "a" }).parentElement?.textContent).toContain(
+      "standard error of roughly ±0.19",
+    );
+  });
 });
