@@ -1,7 +1,7 @@
 // src/components/CountryPanel.tsx
 import { useState } from "react";
 import { motion, AnimatePresence, useDragControls, useReducedMotion, type MotionProps, type PanInfo } from "framer-motion";
-import { sentimentBucket, bucketColor, BUCKET_COLOR } from "../lib/sentiment";
+import { sentimentBucket, bucketColor, bucketsWithinOneSE, BUCKET_COLOR } from "../lib/sentiment";
 import { safeHttpUrl } from "../lib/url";
 import { SentimentFilter } from "./SentimentFilter";
 import { Sparkline } from "./Sparkline";
@@ -10,6 +10,7 @@ import { edgeMotion, growMotion } from "../lib/motion";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useCountryHistory } from "../hooks/useCountryHistory";
 import { ExternalLink, X } from 'lucide-react';
+import { headlineStats } from "../../shared/stats";
 import type { Article, CountryResult, FilterKey, HistoryPoint } from "../../shared/types";
 
 // Below MIN_HISTORY_POINTS there are not enough data points
@@ -134,7 +135,76 @@ function Headlines({ articles }: { articles: Article[] }) {
   );
 }
 
-function SentimentBar({ score }: { score: number }) {
+// The spread behind the shown score:
+// - interval: 2+ headlines with a stored sd, shown as ±1 SE.
+// - single: one headline, so no spread.
+// - unrecorded: scored before sd was stored. `since` is the first day that has it.
+// `measuredOn` is the source day of a carried score.
+type ScoreSpread =
+  | { kind: "interval"; n: number; se: number; measuredOn?: string }
+  | { kind: "single"; measuredOn?: string }
+  | { kind: "unrecorded"; n: number; since: string | null; measuredOn?: string };
+
+function spreadFromPoint(point: HistoryPoint, points: HistoryPoint[], measuredOn?: string): ScoreSpread {
+  // With one headline, sd is 0 by definition, so don't show it as an interval.
+  if (point.n < 2) return { kind: "single", measuredOn };
+  if (point.sd === undefined) {
+    // First day in the window with a stored sd.
+    const since = points.find((p) => p.sd !== undefined)?.date ?? null;
+    return { kind: "unrecorded", n: point.n, since, measuredOn };
+  }
+  return { kind: "interval", n: point.n, se: point.sd / Math.sqrt(point.n), measuredOn };
+}
+
+// Live day: computed from today's headlines. Past day: the stored sd.
+// Returns null if the spread can't be matched to the shown score.
+function resolveSpread(
+  country: CountryResult,
+  historical: CountryPanelProps["historical"],
+  points: HistoryPoint[],
+): ScoreSpread | null {
+  if (!historical) {
+    const stats = headlineStats((country.articles ?? []).map((a) => a.score));
+    if (!stats) return null;
+    return stats.n < 2 ? { kind: "single" } : { kind: "interval", n: stats.n, se: stats.se };
+  }
+  if (historical.carried) {
+    // A carried day shows the latest earlier point. Dates are YYYY-MM-DD, so
+    // strings sort correctly. No interval if the scores disagree (e.g. mid-rebuild).
+    const source = points.filter((p) => p.date < historical.date).at(-1);
+    if (!source || source.score !== historical.score) return null;
+    return spreadFromPoint(source, points, source.date);
+  }
+  const point = points.find((p) => p.date === historical.date);
+  return point ? spreadFromPoint(point, points) : null;
+}
+
+// Sign and two decimals, with a true minus sign as DeltaChip uses.
+function formatSigned(x: number): string {
+  return `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(2)}`;
+}
+
+function spreadCaption(spread: ScoreSpread): string {
+  const parts: string[] = [];
+  if (spread.measuredOn) parts.push(`measured ${formatShortDate(spread.measuredOn)}`);
+  if (spread.kind === "single") {
+    parts.push("from 1 headline", "spread not available");
+  } else {
+    parts.push(`mean of ${spread.n} headlines`);
+    if (spread.kind === "interval") parts.push("±1 standard error");
+  }
+  return parts.join(" · ");
+}
+
+// The other bands the ±1 SE interval reaches (both, for a wide neutral one).
+function spreadCaveat(score: number, se: number): string | null {
+  const shown = sentimentBucket(score);
+  const others = bucketsWithinOneSE(score, se).filter((b) => b !== shown);
+  if (!others.length) return null;
+  return `Not distinguishable from ${others.join(" or ")} at this sample size.`;
+}
+
+function SentimentBar({ score, spread }: { score: number; spread: ScoreSpread | null }) {
   // score in [-1, 1]
   const pct = ((score + 1) / 2) * 100; // map to [0, 100]
   // score is always numeric here, so bucketColor never returns null - the
@@ -153,6 +223,9 @@ function SentimentBar({ score }: { score: number }) {
       ? "Negative"
       : "Very Negative";
 
+  const interval = spread?.kind === "interval" ? spread : null;
+  const caveat = interval ? spreadCaveat(score, interval.se) : null;
+
   return (
     <div className="mb-5">
       <div className="flex justify-between items-center mb-1">
@@ -160,12 +233,24 @@ function SentimentBar({ score }: { score: number }) {
           Sentiment
         </span>
         <span
-          className="text-sm font-bold"
+          className="text-sm font-bold tabular-nums"
           style={{ color }}
+          title="Mean of this country's headline scores, from −1 to +1"
         >
-          {label} ({score >= 0 ? "+" : ""}{score.toFixed(2)})
+          {label} ({formatSigned(score)}
+          {interval && (
+            <span title="±1 standard error of the mean. An interval this wide covers the true mean only about two times in three, so treat it as a guide, not a guarantee.">
+              {" "}± {interval.se.toFixed(2)}
+            </span>
+          )}
+          )
         </span>
       </div>
+      {spread && (
+        <p className="text-[10px] tabular-nums text-right text-fg/50 light:text-black/60 mb-1">
+          {spreadCaption(spread)}
+        </p>
+      )}
       <div className="h-2 rounded-full bg-fg/10 overflow-hidden">
         <motion.div
           className="h-full rounded-full"
@@ -173,6 +258,16 @@ function SentimentBar({ score }: { score: number }) {
           {...growMotion(!!reducedMotion, pct, { duration: 0.6, ease: "easeOut" })}
         />
       </div>
+      {caveat && (
+        <p className="text-[10px] leading-snug text-fg/50 light:text-black/60 mt-1.5">{caveat}</p>
+      )}
+      {spread?.kind === "unrecorded" && (
+        <p className="text-[10px] leading-snug text-fg/50 light:text-black/60 mt-1.5">
+          {spread.since
+            ? `Spread was not recorded before ${formatLongDate(spread.since)}, so no interval is shown for this day.`
+            : "Spread was not recorded for this day, so no interval is shown."}
+        </p>
+      )}
     </div>
   );
 }
@@ -345,7 +440,10 @@ export function CountryPanel({ country, onClose, historical }: CountryPanelProps
           {/* Sentiment score */}
           {typeof (historical ? historical.score : country.score) === "number" && (
             <div className="px-5 pt-4">
-              <SentimentBar score={(historical ? historical.score : country.score) as number} />
+              <SentimentBar
+                score={(historical ? historical.score : country.score) as number}
+                spread={resolveSpread(country, historical, history.points)}
+              />
             </div>
           )}
 

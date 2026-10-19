@@ -116,7 +116,8 @@ describe("CountryPanel historical mode", () => {
     expect(screen.queryByText("Headlines")).toBeNull();
     expect(screen.queryByText("Today only")).toBeNull();
     // The sentiment bar reflects the historical score, not the country's current one.
-    expect(screen.getByText(/Negative \(-0\.42\)/)).toBeTruthy();
+    // U+2212, the panel's minus sign, not a hyphen.
+    expect(screen.getByText(/Negative \(−0\.42/)).toBeTruthy();
   });
 
   it("behaves exactly as before when `historical` is undefined", () => {
@@ -282,5 +283,151 @@ describe("CountryPanel headlines list", () => {
     expect(safe.tagName).toBe("A");
     expect(safe.getAttribute("href")).toBe("https://example.com/safe");
     expect(safe.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+});
+
+describe("CountryPanel uncertainty", () => {
+  const scored = (scores: number[]) => scores.map((score, i) => article({ url: `https://example.com/${i}`, score }));
+
+  // Live day: spread comes from the headlines.
+  const renderLive = (score: number, scores: number[]) => {
+    mockHistory([]);
+    return render(
+      <CountryPanel country={{ ...COUNTRY, score, articles: scored(scores) }} onClose={() => {}} />,
+    );
+  };
+
+  const renderDay = (points: HistoryPoint[], historical: { date: string; score: number; carried?: boolean }) => {
+    mockHistory(points);
+    return render(<CountryPanel country={COUNTRY} onClose={() => {}} historical={historical} />);
+  };
+
+  // The whole score line, e.g. "Negative (−0.20 ± 0.13)".
+  const scoreLine = () =>
+    screen.getByTitle("Mean of this country's headline scores, from −1 to +1").textContent;
+  const caveat = () => screen.queryByText(/Not distinguishable from/);
+  const notRecorded = () => screen.queryByText(/Spread was not recorded/);
+  const CARRIED = "No headlines were scored for this country that day - showing its most recent earlier score.";
+
+  it("shows the interval and the headline count for a live day with 5 headlines", () => {
+    // mean 0.40, sd 0.158, se 0.071
+    renderLive(0.4, [0.6, 0.5, 0.4, 0.3, 0.2]);
+
+    expect(scoreLine()).toBe("Positive (+0.40 ± 0.07)");
+    expect(screen.getByText("mean of 5 headlines · ±1 standard error")).toBeTruthy();
+    // The interval's own tooltip says it is not a guarantee.
+    expect(screen.getByTitle(/about two times in three/).textContent?.trim()).toBe("± 0.07");
+  });
+
+  it("counts the headlines actually scored, not a literal 5, when fewer came back", () => {
+    renderLive(-0.2, [-0.3, -0.2, -0.1]);
+
+    expect(screen.getByText("mean of 3 headlines · ±1 standard error")).toBeTruthy();
+    expect(screen.queryByText(/mean of 5/)).toBeNull();
+  });
+
+  it("says a negative country is not distinguishable from neutral when its interval reaches it", () => {
+    // mean −0.20, se 0.130 → [−0.33, −0.07]
+    renderLive(-0.2, [-0.6, -0.4, -0.1, 0.1, 0]);
+
+    expect(scoreLine()).toBe("Negative (−0.20 ± 0.13)");
+    expect(caveat()?.textContent).toBe("Not distinguishable from neutral at this sample size.");
+  });
+
+  it("names both neighbours for a neutral country whose interval reaches both", () => {
+    // mean 0.08, se 0.185 → [−0.105, 0.265]: neutral, reaching negative and positive.
+    renderLive(0.08, [0.55, 0.4, 0.1, -0.2, -0.45]);
+
+    expect(scoreLine()).toBe("Neutral (+0.08 ± 0.18)");
+    expect(caveat()?.textContent).toBe(
+      "Not distinguishable from negative or positive at this sample size.",
+    );
+  });
+
+  it("shows no caveat when the interval sits comfortably inside one band", () => {
+    renderLive(0.8, [0.85, 0.8, 0.8, 0.75, 0.8]);
+
+    expect(scoreLine()).toBe("Very Positive (+0.80 ± 0.02)");
+    expect(caveat()).toBeNull();
+  });
+
+  it("shows no interval for a single headline, and says why", () => {
+    renderLive(-0.42, [-0.42]);
+
+    expect(scoreLine()).toBe("Negative (−0.42)");
+    expect(screen.getByText("from 1 headline · spread not available")).toBeTruthy();
+    expect(caveat()).toBeNull();
+  });
+
+  it("shows the stored interval on a past day that has sd", () => {
+    // se = 0.2 / sqrt(5) = 0.089
+    renderDay([{ date: "2026-09-20", score: -0.2, n: 5, sd: 0.2 }], { date: "2026-09-20", score: -0.2 });
+
+    expect(scoreLine()).toBe("Negative (−0.20 ± 0.09)");
+    expect(screen.getByText("mean of 5 headlines · ±1 standard error")).toBeTruthy();
+    expect(notRecorded()).toBeNull();
+  });
+
+  it("shows n and the not-recorded note, and no interval, on a past day without sd", () => {
+    renderDay(
+      [
+        { date: "2026-09-19", score: 0.3, n: 4 },
+        { date: "2026-09-25", score: 0.2, n: 5, sd: 0.2 },
+      ],
+      { date: "2026-09-19", score: 0.3 },
+    );
+
+    expect(scoreLine()).toBe("Positive (+0.30)");
+    expect(screen.getByText("mean of 4 headlines")).toBeTruthy();
+    // The date is the earliest point that does carry sd, not a hard-coded one.
+    expect(notRecorded()?.textContent).toBe(
+      "Spread was not recorded before 25 September 2026, so no interval is shown for this day.",
+    );
+    expect(caveat()).toBeNull();
+  });
+
+  it("shows a carried day's source interval, labelled with the source date", () => {
+    renderDay(
+      [
+        { date: "2026-09-18", score: 0.1, n: 5, sd: 0.3 },
+        { date: "2026-09-21", score: -0.3, n: 5, sd: 0.2 },
+      ],
+      { date: "2026-09-22", score: -0.3, carried: true },
+    );
+
+    expect(scoreLine()).toBe("Negative (−0.30 ± 0.09)");
+    expect(screen.getByText("measured Sep 21 · mean of 5 headlines · ±1 standard error")).toBeTruthy();
+    expect(screen.getByText(CARRIED)).toBeTruthy();
+    expect(notRecorded()).toBeNull();
+  });
+
+  it.each([
+    ["the source point's score differs", [{ date: "2026-09-21", score: -0.31, n: 5, sd: 0.2 }]],
+    ["there is no earlier point", [{ date: "2026-09-23", score: -0.3, n: 5, sd: 0.2 }]],
+  ])("shows no interval and no n on a carried day when %s", (_label, points) => {
+    renderDay(points, { date: "2026-09-22", score: -0.3, carried: true });
+
+    expect(scoreLine()).toBe("Negative (−0.30)");
+    expect(screen.queryByText(/headlines? ·|mean of/)).toBeNull();
+    expect(screen.queryByText(/measured/)).toBeNull();
+    expect(notRecorded()).toBeNull();
+    expect(screen.getByText(CARRIED)).toBeTruthy();
+  });
+
+  it("shows n and the not-recorded note on a carried day whose source has no sd", () => {
+    renderDay(
+      [
+        { date: "2026-09-21", score: -0.3, n: 4 },
+        { date: "2026-09-26", score: 0.1, n: 5, sd: 0.2 },
+      ],
+      { date: "2026-09-22", score: -0.3, carried: true },
+    );
+
+    expect(scoreLine()).toBe("Negative (−0.30)");
+    expect(screen.getByText("measured Sep 21 · mean of 4 headlines")).toBeTruthy();
+    expect(notRecorded()?.textContent).toBe(
+      "Spread was not recorded before 26 September 2026, so no interval is shown for this day.",
+    );
+    expect(screen.getByText(CARRIED)).toBeTruthy();
   });
 });
