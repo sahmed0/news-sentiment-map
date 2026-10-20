@@ -7,7 +7,7 @@ import { SentimentFilter } from "./components/SentimentFilter";
 import { FirstVisitHint } from "./components/FirstVisitHint";
 import { BrandBlock } from "./components/BrandBlock";
 import { WorldSummary } from "./components/WorldSummary";
-import { Sheet } from "./components/Sheet";
+import { Tray } from "./components/Tray";
 import { MobileToolbar, type MobileToolbarItem } from "./components/MobileToolbar";
 import { TimeScrubber } from "./components/TimeScrubber";
 import { CountrySearch } from "./components/CountrySearch";
@@ -17,7 +17,8 @@ import { scoresForDay, MIN_HISTORY_DAYS } from "./lib/worldHistory";
 import { useSentimentData } from "./hooks/useSentimentData";
 import { useWorldHistory } from "./hooks/useWorldHistory";
 import { useTheme } from "./hooks/useTheme";
-import { Sun, Moon, Info, Funnel, List, Clock, Search } from 'lucide-react';
+import { AnimatePresence } from "framer-motion";
+import { Sun, Moon, Info, Funnel, ChartBarDecreasing, History, Search } from 'lucide-react';
 import { InfoPanel } from "./components/InfoPanel";
 import type { CountryResult, FilterKey } from "../shared/types";
 
@@ -149,6 +150,8 @@ export default function App() {
     setOpenSheet(open ? "find" : null);
   }, []);
 
+  const closeSheet = useCallback(() => setOpenSheet(null), []);
+
   // Search pans/zooms to the country.
   const handleSearchSelect = useCallback((country: CountryResult) => {
     mapRef.current?.focusCountry(country.code);
@@ -181,7 +184,7 @@ export default function App() {
       ? [{
           key: "time",
           label: "Time",
-          icon: <Clock size={20} />,
+          icon: <History size={20} />,
           active: openSheet === "time",
           onPress: () => setOpenSheet((s) => (s === "time" ? null : "time")),
         } satisfies MobileToolbarItem]
@@ -189,7 +192,7 @@ export default function App() {
     {
       key: "legend",
       label: "Legend",
-      icon: <List size={20} />,
+      icon: <ChartBarDecreasing size={20} />,
       active: openSheet === "legend",
       onPress: () => setOpenSheet((s) => (s === "legend" ? null : "legend")),
     },
@@ -324,7 +327,7 @@ export default function App() {
       </div>
 
       {/* -- Map -- */}
-      <div className="w-full h-full" onClick={() => { setSelectedCountry(null); setShowInfo(false); }}>
+      <div className="w-full h-full" onClick={() => { setSelectedCountry(null); setShowInfo(false); setOpenSheet(null); }}>
         <WorldMap
           byCode={byCode}
           selectedCode={selectedCountry?.code?.toUpperCase() ?? null}
@@ -373,7 +376,7 @@ export default function App() {
           one flex row so the scrubber's width is always whatever space
           Legend actually leaves rather than an independent centered guess
           that can land on top of it. Both are desktop-only; mobile gets
-          them via the toolbar's sheets. The row is full-width at the open
+          them via the toolbar's trays. The row is full-width at the open
           legend's height, so it's click-through and only the controls take
           pointer events. It stops short of an open side panel (w-80) so the
           scrubber stays visible. -- */}
@@ -403,47 +406,46 @@ export default function App() {
         )}
       </div>
 
-      {/* -- Mobile toolbar + sheets: hidden while CountryPanel/InfoPanel is
-          open. All three share the bottom edge at the same z-index, so left
-          unconditional they'd paint over (and stay tappable through) the
-          last ~60px of an open panel; gating them here also means an open
-          sheet is already gone by the time a panel starts sliding in. -- */}
+      {/* -- Mobile toolbar + trays, stacked so the open tray sits just above the
+          toolbar. Hidden while CountryPanel/InfoPanel is open: they share the
+          bottom edge, and this also clears any open tray before a panel slides
+          in. -- */}
       {!loading && data.length > 0 && !selectedCountry && !showInfo && (
-        <>
+        <div className="sm:hidden absolute bottom-3 inset-x-3 z-30 mb-[env(safe-area-inset-bottom)] flex flex-col items-center gap-2 pointer-events-none">
+          {/* One AnimatePresence for every tray: "wait" lets the open one
+              leave before the next arrives, so they never stack. */}
+          <AnimatePresence mode="wait" initial={false}>
+            {openSheet === "filter" && (
+              <Tray key="filter" label="Filter by sentiment" onClose={closeSheet}>
+                <SentimentFilter
+                  value={sentimentFilter}
+                  onChange={setSentimentFilter}
+                  counts={sentimentCounts}
+                />
+              </Tray>
+            )}
+            {openSheet === "legend" && (
+              <Tray key="legend" label="Legend & rankings" align="start" onClose={closeSheet}>
+                <div className="p-2">
+                  <LegendContent data={activeData} lastUpdated={lastUpdated} fromCache={fromCache} />
+                </div>
+              </Tray>
+            )}
+            {hasScrubber && openSheet === "time" && (
+              <Tray key="time" label="Timeline" onClose={closeSheet}>
+                <TimeScrubber
+                  days={history.days}
+                  value={activeDayIndex}
+                  onPreview={handleScrubPreview}
+                  onCommit={handleScrubCommit}
+                  chrome={false}
+                  className="pl-1"
+                />
+              </Tray>
+            )}
+          </AnimatePresence>
           <MobileToolbar items={mobileToolbarItems} />
-          <Sheet
-            open={openSheet === "filter"}
-            onClose={() => setOpenSheet(null)}
-            title="Filter by sentiment"
-          >
-            <SentimentFilter
-              value={sentimentFilter}
-              onChange={setSentimentFilter}
-              counts={sentimentCounts}
-            />
-          </Sheet>
-          <Sheet
-            open={openSheet === "legend"}
-            onClose={() => setOpenSheet(null)}
-            title="Legend & rankings"
-          >
-            <LegendContent data={activeData} lastUpdated={lastUpdated} fromCache={fromCache} />
-          </Sheet>
-          {hasScrubber && (
-            <Sheet
-              open={openSheet === "time"}
-              onClose={() => setOpenSheet(null)}
-              title="Timeline"
-            >
-              <TimeScrubber
-                days={history.days}
-                value={activeDayIndex}
-                onPreview={handleScrubPreview}
-                onCommit={handleScrubCommit}
-              />
-            </Sheet>
-          )}
-        </>
+        </div>
       )}
     </div>
   );

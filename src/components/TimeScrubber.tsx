@@ -16,9 +16,12 @@ interface TimeScrubberProps {
   // Fired on release / keyboard commit / autoplay step: hand the day to React.
   onCommit: (i: number) => void;
   className?: string;
+  // Draw its own glass pill (the desktop dock). Off inside a mobile Tray,
+  // which is already the card.
+  chrome?: boolean;
 }
 
-export function TimeScrubber({ days, value, onPreview, onCommit, className }: TimeScrubberProps) {
+export function TimeScrubber({ days, value, onPreview, onCommit, className, chrome = true }: TimeScrubberProps) {
   const last = days.length - 1;
   const [pos, setPos] = useState(value);
   const [syncedValue, setSyncedValue] = useState(value);
@@ -62,12 +65,16 @@ export function TimeScrubber({ days, value, onPreview, onCommit, className }: Ti
 
   return (
     <div
-      className={`flex items-center gap-3 rounded-full px-3 py-2 ${className ?? ""}`}
-      style={{
-        background: "rgb(var(--panel-rgb) / 0.85)",
-        backdropFilter: "blur(12px)",
-        border: "1px solid rgb(var(--fg-rgb) / 0.08)",
-      }}
+      className={`flex items-center gap-3 ${chrome ? "rounded-full px-3 py-2" : ""} ${className ?? ""}`}
+      style={
+        chrome
+          ? {
+              background: "rgb(var(--panel-rgb) / 0.85)",
+              backdropFilter: "blur(12px)",
+              border: "1px solid rgb(var(--fg-rgb) / 0.08)",
+            }
+          : undefined
+      }
     >
       <button
         type="button"

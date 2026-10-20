@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import type { CountryResult } from "../../shared/types";
 import type { UseSentimentData } from "../../src/hooks/useSentimentData";
 
@@ -153,7 +153,7 @@ describe("App brand block", () => {
 });
 
 describe("App mobile toolbar", () => {
-  it("shows Filter and Legend items that open sheets, with no old bottom filter bar", () => {
+  it("shows Filter and Legend items that open trays, with no old bottom filter bar", async () => {
     const realMatchMedia = window.matchMedia;
     window.matchMedia = ((query: string) => ({
       matches: true,
@@ -171,10 +171,40 @@ describe("App mobile toolbar", () => {
       render(<App />);
 
       fireEvent.click(screen.getByRole("button", { name: "Filter" }));
-      expect(screen.getByRole("heading", { name: "Filter by sentiment" })).toBeTruthy();
+      expect(screen.getByRole("dialog", { name: "Filter by sentiment" })).toBeTruthy();
 
       fireEvent.click(screen.getByRole("button", { name: "Legend" }));
-      expect(screen.getByRole("heading", { name: "Legend & rankings" })).toBeTruthy();
+      // The filter tray leaves first, so the legend tray arrives a moment later.
+      expect(await screen.findByRole("dialog", { name: "Legend & rankings" })).toBeTruthy();
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
+  });
+
+  it("closes an open tray when the map is tapped", async () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      mockHook({ data: [COUNTRY] });
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+      expect(screen.getByRole("dialog", { name: "Filter by sentiment" })).toBeTruthy();
+
+      fireEvent.click(screen.getByTestId("worldmap"));
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog", { name: "Filter by sentiment" })).toBeNull(),
+      );
     } finally {
       window.matchMedia = realMatchMedia;
     }
@@ -183,8 +213,8 @@ describe("App mobile toolbar", () => {
   // Regression: the toolbar and the info panel share the bottom edge on
   // mobile at the same z-index. Left both up at once, the toolbar (which has
   // no closed state of its own) would paint over the panel's last ~60px and
-  // stay tappable there, and a sheet opened earlier would linger underneath it.
-  it("hides itself and closes any open sheet once the info panel opens", () => {
+  // stay tappable there, and a tray opened earlier would linger underneath it.
+  it("hides itself and closes any open tray once the info panel opens", () => {
     const realMatchMedia = window.matchMedia;
     window.matchMedia = ((query: string) => ({
       matches: true,
@@ -202,11 +232,11 @@ describe("App mobile toolbar", () => {
       render(<App />);
 
       fireEvent.click(screen.getByRole("button", { name: "Filter" }));
-      expect(screen.getByRole("heading", { name: "Filter by sentiment" })).toBeTruthy();
+      expect(screen.getByRole("dialog", { name: "Filter by sentiment" })).toBeTruthy();
 
       fireEvent.click(screen.getByRole("button", { name: "About this project" }));
 
-      expect(screen.queryByRole("heading", { name: "Filter by sentiment" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "Filter by sentiment" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Filter" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Legend" })).toBeNull();
     } finally {
@@ -234,7 +264,7 @@ describe("App time scrubber", () => {
     expect((screen.getByRole("button", { name: "Live" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("adds a Time item to the mobile toolbar that opens the timeline sheet", () => {
+  it("adds a Time item to the mobile toolbar that opens the timeline tray", () => {
     const realMatchMedia = window.matchMedia;
     window.matchMedia = ((query: string) => ({
       matches: true,
@@ -253,8 +283,8 @@ describe("App time scrubber", () => {
       render(<App />);
 
       fireEvent.click(screen.getByRole("button", { name: "Time" }));
-      expect(screen.getByRole("heading", { name: "Timeline" })).toBeTruthy();
-      // The desktop dock plus the sheet's own copy.
+      expect(screen.getByRole("dialog", { name: "Timeline" })).toBeTruthy();
+      // The desktop dock plus the tray's own copy.
       expect(screen.getAllByRole("slider").length).toBeGreaterThanOrEqual(1);
     } finally {
       window.matchMedia = realMatchMedia;
