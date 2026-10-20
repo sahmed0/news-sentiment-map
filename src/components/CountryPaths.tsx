@@ -11,6 +11,7 @@
 // country object, and `scores` (the scrubber's per-day override, when present)
 // is memoized in App.
 import { memo } from "react";
+import isoCountries from "i18n-iso-countries";
 import type { Feature } from "geojson";
 import { sentimentBucket, scoreColor } from "../lib/sentiment";
 import { numericToAlpha2 } from "../lib/geo";
@@ -64,6 +65,17 @@ export const CountryPaths = memo(function CountryPaths({
           (!hasData || sentimentBucket(score) !== sentimentFilter);
         const d = paths[numId];
         if (!d) return null;
+        // Uncovered countries aren't in byCode, so fall back to the ISO name
+        // (as the labels do), then world-atlas's own name.
+        const name =
+          countryData?.name ??
+          (alpha2 && isoCountries.getName(alpha2, "en")) ??
+          String(f.properties?.name ?? numId);
+        // Hover only: a touch tap fires enter/move but never leave, which
+        // would strand the tooltip on screen.
+        const hover = (e: React.PointerEvent) => {
+          if (e.pointerType === "mouse") onHover(e, name, score);
+        };
 
         return (
           <path
@@ -85,12 +97,15 @@ export const CountryPaths = memo(function CountryPaths({
               transition: "opacity 0.15s, filter 0.15s, fill 0.6s ease-out",
             }}
             onClick={(e) => {
+              // An unscored country lets the click through to the map, which
+              // closes any open panel like a click on the sea does.
+              if (!hasData || !countryData) return;
               e.stopPropagation();
-              if (hasData && countryData) onSelectCountry(countryData);
+              onSelectCountry(countryData);
             }}
-            onMouseMove={(e) => onHover(e, countryData?.name ?? numId, score)}
-            onMouseEnter={(e) => onHover(e, countryData?.name ?? numId, score)}
-            onMouseLeave={onHoverEnd}
+            onPointerMove={hover}
+            onPointerEnter={hover}
+            onPointerLeave={onHoverEnd}
           />
         );
       })}
