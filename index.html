@@ -27,10 +27,11 @@
 
     <!-- Apply the saved theme to <html> before paint so the html/body background
          (which fills the iOS safe-area below the bottom bar) matches the map and
-         doesn't flash. Mirrors the "light" default in src/hooks/useTheme.ts. -->
+         doesn't flash. Mirrors the "dark" default and storage key in
+         src/hooks/useTheme.ts. -->
     <script>
       try {
-        if (localStorage.getItem("nsm-theme") !== "dark") {
+        if (localStorage.getItem("nsm-theme-choice") === "light") {
           document.documentElement.classList.add("theme-light");
         }
       } catch (e) {}
