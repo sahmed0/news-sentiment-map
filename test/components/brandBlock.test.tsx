@@ -6,10 +6,17 @@ import { BrandBlock } from "../../src/components/BrandBlock.js";
 afterEach(cleanup);
 
 describe("BrandBlock", () => {
-  it("renders the title", () => {
+  it("keeps the title as a screen-reader-only heading", () => {
     render(<BrandBlock />);
 
-    expect(screen.getByText("World News Sentiment")).toBeTruthy();
+    const title = screen.getByRole("heading", { level: 1, name: "World News Sentiment" });
+    expect(title.className).toContain("sr-only");
+  });
+
+  it("draws no card when there is nothing to put in it", () => {
+    const { container } = render(<BrandBlock />);
+
+    expect(container.querySelector("div")).toBeNull();
   });
 
   it("renders children into the slot", () => {

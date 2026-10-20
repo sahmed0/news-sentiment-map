@@ -19,6 +19,7 @@ describe("WorldSummary", () => {
   it("renders the headline above the detail line", () => {
     render(<WorldSummary summary={SUMMARY} />);
 
+    expect(screen.getByText("World news ·")).toBeTruthy();
     expect(screen.getByText("More negative than usual")).toBeTruthy();
     expect(screen.getByText("−0.14 today · 0.12 below the 30-day average")).toBeTruthy();
   });

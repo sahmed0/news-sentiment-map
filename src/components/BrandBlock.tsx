@@ -5,26 +5,26 @@ interface BrandBlockProps {
   children?: ReactNode;
 }
 
-// App identity: the title, visible at every breakpoint. The
-// children slot holds the summary stat once that ships.
+// The top-left card holding the world summary. The app title stays as the
+// page's <h1> for screen readers and search engines, but isn't drawn.
+// With no children (no summary yet) the card is skipped.
 export function BrandBlock({ children }: BrandBlockProps) {
   return (
-    <div
-      className="pointer-events-none rounded-lg py-1 px-3 text-left"
-      style={{
-        background: "rgb(var(--panel-rgb) / 0.85)",
-        backdropFilter: "blur(12px)",
-        border: "1px solid rgb(var(--fg-rgb) / 0.08)",
-        color: "rgb(var(--fg-rgb))",
-      }}
-    >
-      <h1
-        className="text-base sm:text-2xl font-black tracking-tight truncate"
-        style={{ fontFamily: "'DM Serif Display', serif", letterSpacing: "-0.02em" }}
-      >
-        World News Sentiment
-      </h1>
-      {children}
-    </div>
+    <>
+      <h1 className="sr-only">World News Sentiment</h1>
+      {children && (
+        <div
+          className="pointer-events-none rounded-lg py-1.5 px-3 text-left"
+          style={{
+            background: "rgb(var(--panel-rgb) / 0.85)",
+            backdropFilter: "blur(12px)",
+            border: "1px solid rgb(var(--fg-rgb) / 0.08)",
+            color: "rgb(var(--fg-rgb))",
+          }}
+        >
+          {children}
+        </div>
+      )}
+    </>
   );
 }

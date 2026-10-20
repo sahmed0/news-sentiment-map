@@ -354,6 +354,8 @@ describe("App world summary", () => {
     render(<App />);
 
     expect(screen.queryByText("In line with the last 30 days")).toBeNull();
+    // No summary means no card at all, not an empty one.
+    expect(screen.queryByText(/World news/)).toBeNull();
   });
 });
 
