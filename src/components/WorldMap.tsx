@@ -437,8 +437,10 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
 
       {/* Zoom hint - the topology is bundled, so the map is never empty. */}
       <p className="absolute bottom-20 right-4 sm:bottom-2 mb-[env(safe-area-inset-bottom)] text-[10px] opacity-60 pointer-events-none text-right">
-        <span className="md:hidden">Pinch to zoom · Double-tap to reset</span>
-        <span className="hidden md:inline">Scroll to zoom · Double-click to reset</span>
+        {/* Keyed to the input device, not the width: a narrow desktop window
+            still scrolls, and a large touch tablet still pinches. */}
+        <span className="hidden pointer-coarse:inline">Pinch to zoom · Double-tap to reset</span>
+        <span className="pointer-coarse:hidden">Scroll to zoom · Double-click to reset</span>
       </p>
     </div>
   );
