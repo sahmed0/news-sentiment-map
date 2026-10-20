@@ -61,6 +61,28 @@ body,
   scrollbar-width: thin;
 }
 
+/* iOS Safari only paints page pixels under its glass tab bar when the
+   document can scroll. So on iOS the map hangs --map-bleed below the visible
+   edge (more than the ~98px the bar covers) and nothing may scroll the
+   document: no pan starts on the shell, inner scrollers don't chain to it,
+   and App undoes any other scroll (e.g. input focus). Fixed or
+   overflow: hidden layouts stop Safari painting under the bar - both were
+   tried on a device. The shell still clips sideways for side panels.
+   -webkit-touch-callout is only supported on iOS/iPadOS Safari. */
+@supports (-webkit-touch-callout: none) {
+  :root {
+    --map-bleed: 160px;
+  }
+  [data-app-shell] {
+    overflow-x: clip;
+    overflow-y: visible;
+    touch-action: none;
+  }
+  [data-app-shell] * {
+    overscroll-behavior: contain;
+  }
+}
+
 body {
   margin: 0;
   /* Stop pull-to-refresh / rubber-banding from fighting the map's drag & pinch gestures. */

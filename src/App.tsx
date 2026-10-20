@@ -72,6 +72,17 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [showHint, dismissHint]);
 
+  // On iOS the map overhangs the page so Safari paints it under the tab bar,
+  // which leaves the document scrollable (see index.css). Gestures can't
+  // scroll it; anything else that does, like an input focus, is undone.
+  useEffect(() => {
+    const reset = () => {
+      if (window.scrollY !== 0) window.scrollTo(0, 0);
+    };
+    window.addEventListener("scroll", reset, { passive: true });
+    return () => window.removeEventListener("scroll", reset);
+  }, []);
+
   // The timeline only shows once there's a week of history to
   // scrub; below that no scrubber renders.
   const hasScrubber = !loading && data.length > 0 && history.days.length >= MIN_HISTORY_DAYS;
@@ -213,6 +224,7 @@ export default function App() {
 
   return (
     <div
+      data-app-shell
       className={`relative w-full h-full overflow-hidden transition-colors duration-300 ${
         theme === "light" ? "theme-light" : ""
       }`}
@@ -345,7 +357,12 @@ export default function App() {
       </div>
 
       {/* -- Map -- */}
-      <div className="w-full h-full" onClick={() => { setSelectedCountry(null); setShowInfo(false); setOpenSheet(null); }}>
+      {/* The bottom offset is the iOS overhang under Safari's tab bar; 0 elsewhere. */}
+      <div
+        className="absolute inset-x-0 top-0"
+        style={{ bottom: "calc(-1 * var(--map-bleed, 0px))" }}
+        onClick={() => { setSelectedCountry(null); setShowInfo(false); setOpenSheet(null); }}
+      >
         <WorldMap
           byCode={byCode}
           selectedCode={selectedCountry?.code?.toUpperCase() ?? null}

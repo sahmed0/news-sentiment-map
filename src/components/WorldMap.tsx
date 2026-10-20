@@ -49,6 +49,16 @@ interface WorldMapProps {
   handleRef?: Ref<WorldMapHandle>;
 }
 
+// Where the focus point opens down the visible height:
+// 0 = top edge, 0.5 = centre, 1 = bottom edge.
+const FOCUS_Y = 0.35;
+// How far the map hangs below the visible bottom edge: --map-bleed, set only on
+// iOS (see index.css), else 0.
+function mapBleed(el: Element | null): number {
+  if (!el) return 0;
+  return parseFloat(getComputedStyle(el).getPropertyValue("--map-bleed")) || 0;
+}
+
 // Placed country label after collision filtering.
 interface LabelCandidate {
   numId: string;
@@ -77,16 +87,19 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
     const svgEl = svgRef.current;
     const width = svgEl?.clientWidth || 960;
     const height = svgEl?.clientHeight || 500;
+    // Scale and focus on the part the user can see; the iOS overhang below it
+    // just gets more map, so the framing matches every other platform.
+    const viewHeight = height - mapBleed(svgEl);
     const fc: FeatureCollection = { type: "FeatureCollection", features };
 
     // Start from a fit-inside projection, then scale up so the map *covers* the
     // viewport - filling whichever dimension fitSize left short and cropping the
     // overflow. fitSize alone fits the whole world inside the box, which leaves
     // empty bands (and looks too zoomed out) on non-2:1 viewports.
-    const projection = geoNaturalEarth1().fitSize([width, height], fc);
+    const projection = geoNaturalEarth1().fitSize([width, viewHeight], fc);
 
     const [[x0, y0], [x1, y1]] = geoPath(projection).bounds(fc);
-    const coverScale = Math.max(width / (x1 - x0), height / (y1 - y0));
+    const coverScale = Math.max(width / (x1 - x0), viewHeight / (y1 - y0));
     projection.scale(projection.scale() * coverScale);
 
     // Anchor the view on Europe / North Africa / Middle East rather than the
@@ -99,16 +112,15 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
       const [fx, fy] = focus;
       const [t0x, t0y] = projection.translate();
       let nx = t0x + width / 2 - fx;
-      let ny = t0y + height / 2 - fy;
+      const ny = t0y + viewHeight * FOCUS_Y - fy;
 
-      // Clamp the focal offset so the map still fully covers the viewport - no
-      // empty gutters where it has been cropped.
+      // Clamp sideways only, so no empty gutter shows at the left or right
+      // edge. Vertically the map is usually exactly as tall as the view, so a
+      // clamp there would pin it and FOCUS_Y would do nothing.
       projection.translate([nx, ny]);
-      const [[bx0, by0], [bx1, by1]] = geoPath(projection).bounds(fc);
+      const [[bx0], [bx1]] = geoPath(projection).bounds(fc);
       if (bx0 > 0) nx -= bx0;
       else if (bx1 < width) nx += width - bx1;
-      if (by0 > 0) ny -= by0;
-      else if (by1 < height) ny += height - by1;
       projection.translate([nx, ny]);
     }
 
@@ -286,7 +298,7 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
         const k = !area ? 1.5 : area < 1500 ? 3 : area < 8000 ? 2 : 1.5;
 
         const w = svgEl.clientWidth || 960;
-        const h = svgEl.clientHeight || 500;
+        const h = (svgEl.clientHeight || 500) - mapBleed(svgEl);
         const RIGHT_PANEL_PX = 320; // matches CountryPanel's w-80
         const targetX = isMobile ? w / 2 : (w - RIGHT_PANEL_PX) / 2;
         const targetY = isMobile ? h * 0.12 : h / 2;
@@ -436,7 +448,7 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
       )}
 
       {/* Zoom hint - the topology is bundled, so the map is never empty. */}
-      <p className="absolute bottom-20 right-4 sm:bottom-2 mb-[env(safe-area-inset-bottom)] text-[10px] opacity-60 pointer-events-none text-right">
+      <p className="absolute bottom-20 right-4 sm:bottom-2 mb-[calc(env(safe-area-inset-bottom)+var(--map-bleed,0px))] text-[10px] opacity-60 pointer-events-none text-right">
         {/* Keyed to the input device, not the width: a narrow desktop window
             still scrolls, and a large touch tablet still pinches. */}
         <span className="hidden pointer-coarse:inline">Pinch to zoom · Double-tap to reset</span>
