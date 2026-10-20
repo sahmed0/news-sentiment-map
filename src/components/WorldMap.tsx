@@ -19,11 +19,20 @@ import type { Topology, GeometryCollection } from "topojson-specification";
 // A JSON import is inferred structurally, so assert the shape feature() needs.
 const world = topo as unknown as Topology<{ countries: GeometryCollection }>;
 
-// Kosovo, N. Cyprus and Somaliland have no ISO numeric id in world-atlas. Key
-// them by name so they draw as unscored land rather than holes in the map.
-const countries = (feature(world, world.objects.countries).features as Feature[]).map((f) =>
-  f.id == null ? { ...f, id: String(f.properties?.name) } : f,
-);
+const allFeatures = feature(world, world.objects.countries).features as Feature[];
+
+// The whole world, Antarctica included, is what the projection is framed on:
+// fitting without it zooms in and looks cramped on wide screens.
+const framing: FeatureCollection = { type: "FeatureCollection", features: allFeatures };
+
+// What's drawn: Antarctica (ISO 010) is left out - it has no countries or
+// press, so it could only ever be an empty blob along the bottom.
+// Kosovo, N. Cyprus and Somaliland have no ISO numeric id in world-atlas,
+// so they're keyed by name and draw as unscored land rather
+// than holes in the map.
+const countries = allFeatures
+  .filter((f) => f.id !== "010")
+  .map((f) => (f.id == null ? { ...f, id: String(f.properties?.name) } : f));
 
 // Imperative escape hatch for TimeScrubber and Search. Writing 155 fills straight to the
 // DOM per frame skips React's diff - the same reason d3 owns the zoom transform
@@ -90,7 +99,8 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
     // Scale and focus on the part the user can see; the iOS overhang below it
     // just gets more map, so the framing matches every other platform.
     const viewHeight = height - mapBleed(svgEl);
-    const fc: FeatureCollection = { type: "FeatureCollection", features };
+    // Framed on the whole world (see `framing`); only `features` are drawn.
+    const fc = framing;
 
     // Start from a fit-inside projection, then scale up so the map *covers* the
     // viewport - filling whichever dimension fitSize left short and cropping the
