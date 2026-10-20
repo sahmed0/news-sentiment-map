@@ -397,7 +397,10 @@ export function CountryPanel({ country, onClose, historical }: CountryPanelProps
           transition={{ type: "spring", stiffness: 300, damping: 30 }}
           className={`absolute z-20 flex flex-col ${
             isMobile
-              ? "inset-x-0 bottom-0 h-[85dvh] max-h-[85dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)]"
+              ? // Runs --map-bleed past the bottom edge (iOS only, else 0) so
+                // the panel, not the map, shows through Safari's tab bar; the
+                // matching padding keeps the content above the bar.
+                "inset-x-0 -bottom-(--map-bleed,0px) h-[calc(85dvh+var(--map-bleed,0px))] max-h-[calc(85dvh+var(--map-bleed,0px))] rounded-t-2xl pb-[calc(env(safe-area-inset-bottom)+var(--map-bleed,0px))]"
               : "top-0 right-0 h-full w-80"
           }`}
           style={{

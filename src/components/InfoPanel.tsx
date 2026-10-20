@@ -53,8 +53,9 @@ export function InfoPanel({ open, onClose }: InfoPanelProps) {
           transition={{ type: "spring", stiffness: 300, damping: 30 }}
           className={`absolute z-20 flex flex-col ${
             isMobile
-              ? "inset-x-0 bottom-0 h-[85dvh] max-h-[85dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom)]"
-              : "top-0 right-0 h-full w-80"
+              ? // Runs under Safari's tab bar on iOS, as CountryPanel does.
+                "inset-x-0 -bottom-(--map-bleed,0px) h-[calc(85dvh+var(--map-bleed,0px))] max-h-[calc(85dvh+var(--map-bleed,0px))] rounded-t-2xl pb-[calc(env(safe-area-inset-bottom)+var(--map-bleed,0px))]"
+              : "top-0 right-0 h-screen w-80"
           }`}
           style={{
             background: "rgb(var(--panel-rgb) / 0.85)",
