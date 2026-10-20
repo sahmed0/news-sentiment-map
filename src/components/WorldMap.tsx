@@ -19,7 +19,11 @@ import type { Topology, GeometryCollection } from "topojson-specification";
 // A JSON import is inferred structurally, so assert the shape feature() needs.
 const world = topo as unknown as Topology<{ countries: GeometryCollection }>;
 
-const countries = feature(world, world.objects.countries).features as Feature[];
+// Kosovo, N. Cyprus and Somaliland have no ISO numeric id in world-atlas. Key
+// them by name so they draw as unscored land rather than holes in the map.
+const countries = (feature(world, world.objects.countries).features as Feature[]).map((f) =>
+  f.id == null ? { ...f, id: String(f.properties?.name) } : f,
+);
 
 // Imperative escape hatch for TimeScrubber and Search. Writing 155 fills straight to the
 // DOM per frame skips React's diff - the same reason d3 owns the zoom transform
