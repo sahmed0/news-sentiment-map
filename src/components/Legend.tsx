@@ -121,7 +121,7 @@ export function Legend({ data, lastUpdated, fromCache }: LegendProps) {
   const [open, setOpen] = useState(true);
 
   return (
-    <div className="hidden sm:block shrink-0">
+    <div className="hidden sm:block shrink-0 pointer-events-auto">
       <button
         onClick={() => setOpen((o) => !o)}
         className="mb-2 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold"

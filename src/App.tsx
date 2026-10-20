@@ -206,15 +206,17 @@ export default function App() {
           filter's position always follows BrandBlock's actual rendered
           height instead of a hardcoded offset that WorldSummary's copy can
           outgrow. right-24 on mobile keeps it clear of the top-right icon
-          buttons; the filter itself only shows md+ regardless. */}
-      <div className="absolute top-3 left-3 right-24 sm:right-auto z-10 flex flex-col items-start gap-2">
+          buttons; the filter itself only shows md+ regardless. Click-through
+          like the bottom bar, so the space beside the narrower block (and
+          BrandBlock itself) still reaches the map. */}
+      <div className="absolute top-3 left-3 right-24 sm:right-auto z-10 flex flex-col items-start gap-2 pointer-events-none">
         <BrandBlock>
           <WorldSummary summary={worldSummary} />
         </BrandBlock>
 
         {!loading && data.length > 0 && (
           <div
-            className="hidden sm:block rounded-xl p-2"
+            className="hidden sm:block rounded-xl p-2 pointer-events-auto"
             style={{
               background: "rgb(var(--panel-rgb) / 0.85)",
               backdropFilter: "blur(12px)",
@@ -371,8 +373,15 @@ export default function App() {
           one flex row so the scrubber's width is always whatever space
           Legend actually leaves rather than an independent centered guess
           that can land on top of it. Both are desktop-only; mobile gets
-          them via the toolbar's sheets. -- */}
-      <div className="absolute bottom-3 inset-x-3 z-10 flex items-end gap-3 mb-[env(safe-area-inset-bottom)]">
+          them via the toolbar's sheets. The row is full-width at the open
+          legend's height, so it's click-through and only the controls take
+          pointer events. It stops short of an open side panel (w-80) so the
+          scrubber stays visible. -- */}
+      <div
+        className={`absolute bottom-3 left-3 right-3 z-10 flex items-end gap-3 mb-[env(safe-area-inset-bottom)] pointer-events-none ${
+          selectedCountry || showInfo ? "sm:right-86" : ""
+        }`}
+      >
         {!loading && data.length > 0 && (
           <Legend
             data={activeData}
@@ -388,7 +397,7 @@ export default function App() {
               value={activeDayIndex}
               onPreview={handleScrubPreview}
               onCommit={handleScrubCommit}
-              className="w-full md:w-[min(46rem,100%)]"
+              className="w-full md:w-[min(46rem,100%)] pointer-events-auto"
             />
           </div>
         )}
