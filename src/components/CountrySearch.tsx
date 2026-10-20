@@ -1,16 +1,13 @@
 // src/components/CountrySearch.tsx
 // The keyboard route to a country: ⌘K from anywhere, a full combobox, and a
-// camera move on select. Desktop renders a centred overlay; mobile
-// renders into a bottom Sheet so the on-screen keyboard pushes up under the
-// results instead of covering them.
+// camera move on select. One overlay for every screen size, anchored in the
+// upper third so the on-screen keyboard can't cover the results on a phone.
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, X } from "lucide-react";
 import { buildSearchIndex, searchCountries, type SearchResult } from "../lib/search";
 import { flagEmoji } from "../lib/geo";
 import { sentimentBucket } from "../lib/sentiment";
-import { useIsMobile } from "../hooks/useMediaQuery";
-import { Sheet } from "./Sheet";
 import type { CountryResult } from "../../shared/types";
 
 const MAX_RESULTS = 8;
@@ -51,7 +48,6 @@ function ScoreChip({ score }: { score: number | null }) {
 }
 
 export function CountrySearch({ byCode, open, onOpenChange, onSelect }: CountrySearchProps) {
-  const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -182,7 +178,8 @@ export function CountrySearch({ byCode, open, onOpenChange, onSelect }: CountryS
         id={listId}
         role="listbox"
         aria-label="Countries"
-        className="mt-2 max-h-[min(50vh,22rem)] overflow-y-auto"
+        // Shorter on a phone: the list has to end above the on-screen keyboard.
+        className="mt-2 max-h-[30vh] sm:max-h-[min(50vh,22rem)] overflow-y-auto"
       >
         {results.map((r, i) => {
           const country = r.hasData ? byCode[r.code.toUpperCase()] : undefined;
@@ -225,16 +222,6 @@ export function CountrySearch({ byCode, open, onOpenChange, onSelect }: CountryS
     </>
   );
 
-  if (isMobile) {
-    return (
-      <Sheet open={open} onClose={() => onOpenChange(false)} title="Find a country">
-        <div ref={panelRef} onKeyDown={onKeyDown}>
-          {inner}
-        </div>
-      </Sheet>
-    );
-  }
-
   return (
     <AnimatePresence>
       {open && (
@@ -260,7 +247,7 @@ export function CountrySearch({ byCode, open, onOpenChange, onSelect }: CountryS
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="relative mt-[20vh] w-[min(28rem,calc(100vw-2rem))] rounded-2xl p-4"
+            className="relative mt-[12vh] sm:mt-[20vh] w-[min(28rem,calc(100vw-2rem))] rounded-2xl p-4"
             style={{
               background: "rgb(var(--panel-rgb) / 0.92)",
               backdropFilter: "blur(16px)",

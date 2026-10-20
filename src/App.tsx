@@ -335,7 +335,7 @@ export default function App() {
         />
       </div>
 
-      {/* -- Country search: ⌘K overlay on desktop, a Sheet on mobile. -- */}
+      {/* -- Country search: a ⌘K overlay, also opened from the mobile toolbar. -- */}
       {!loading && data.length > 0 && (
         <div onClick={(e) => e.stopPropagation()}>
           <CountrySearch
