@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 import type { CountryResult } from "../../shared/types";
 import type { UseSentimentData } from "../../src/hooks/useSentimentData";
 
@@ -214,7 +214,7 @@ describe("App mobile toolbar", () => {
   // mobile at the same z-index. Left both up at once, the toolbar (which has
   // no closed state of its own) would paint over the panel's last ~60px and
   // stay tappable there, and a tray opened earlier would linger underneath it.
-  it("hides itself and closes any open tray once the info panel opens", () => {
+  it("hides itself and closes any open tray once the info panel opens", async () => {
     const realMatchMedia = window.matchMedia;
     window.matchMedia = ((query: string) => ({
       matches: true,
@@ -231,14 +231,45 @@ describe("App mobile toolbar", () => {
       mockHook({ data: [COUNTRY] });
       render(<App />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Filter" }));
-      expect(screen.getByRole("dialog", { name: "Filter by sentiment" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "More" }));
+      const more = await screen.findByRole("dialog", { name: "More options" });
 
-      fireEvent.click(screen.getByRole("button", { name: "About this project" }));
+      fireEvent.click(within(more).getByRole("button", { name: "About this project" }));
 
-      expect(screen.queryByRole("dialog", { name: "Filter by sentiment" })).toBeNull();
+      expect(screen.getByRole("heading", { name: "World News Sentiment", level: 2 })).toBeTruthy();
+      expect(screen.queryByRole("dialog", { name: "More options" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Filter" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Legend" })).toBeNull();
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
+  });
+
+  it("switches theme from the More tray and keeps the tray open", async () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    try {
+      mockHook({ data: [COUNTRY] });
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "More" }));
+      const more = await screen.findByRole("dialog", { name: "More options" });
+      const before = within(more).getByRole("button", { name: /mode$/ }).textContent;
+
+      fireEvent.click(within(more).getByRole("button", { name: /mode$/ }));
+
+      expect(within(more).getByRole("button", { name: /mode$/ }).textContent).not.toBe(before);
+      expect(screen.getByRole("dialog", { name: "More options" })).toBeTruthy();
     } finally {
       window.matchMedia = realMatchMedia;
     }

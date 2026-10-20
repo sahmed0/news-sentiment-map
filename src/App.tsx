@@ -18,7 +18,7 @@ import { useSentimentData } from "./hooks/useSentimentData";
 import { useWorldHistory } from "./hooks/useWorldHistory";
 import { useTheme } from "./hooks/useTheme";
 import { AnimatePresence } from "framer-motion";
-import { Sun, Moon, Info, Funnel, ChartBarDecreasing, History, Search } from 'lucide-react';
+import { Sun, Moon, Info, Funnel, ChartBarDecreasing, History, Search, Ellipsis } from 'lucide-react';
 import { InfoPanel } from "./components/InfoPanel";
 import type { CountryResult, FilterKey } from "../shared/types";
 
@@ -36,7 +36,7 @@ export default function App() {
   const [sentimentFilter, setSentimentFilter] = useState<FilterKey>("all");
   const [showInfo, setShowInfo] = useState(false);
   // Selecting a country closes whichever sheet is open.
-  const [openSheet, setOpenSheet] = useState<null | "filter" | "legend" | "time" | "find">(null);
+  const [openSheet, setOpenSheet] = useState<null | "filter" | "legend" | "time" | "more" | "find">(null);
   // The scrubber's day, or null for live/today. The map handle is driven
   // imperatively during a drag (see handlePreview) to skip 155 React diffs/frame.
   const [dayIndex, setDayIndex] = useState<number | null>(null);
@@ -196,7 +196,20 @@ export default function App() {
       active: openSheet === "legend",
       onPress: () => setOpenSheet((s) => (s === "legend" ? null : "legend")),
     },
+    {
+      key: "more",
+      label: "More",
+      icon: <Ellipsis size={20} />,
+      active: openSheet === "more",
+      onPress: () => setOpenSheet((s) => (s === "more" ? null : "more")),
+    },
   ];
+
+  // The toolbar (and with it the More tray) only exists once data is in. Until
+  // then mobile keeps the top-right theme and About buttons.
+  const hasToolbar = !loading && data.length > 0;
+
+  const menuRowClass = "w-full flex items-center gap-3 rounded-lg px-2 py-2.5 text-sm text-left";
 
   return (
     <div
@@ -208,13 +221,15 @@ export default function App() {
       {/* -- Brand + sentiment filter, stacked in one flex column so the
           filter's position always follows BrandBlock's actual rendered
           height instead of a hardcoded offset that WorldSummary's copy can
-          outgrow. right-24 on mobile keeps it clear of the top-right icon
-          buttons; the filter itself only shows md+ regardless. Click-through
-          like the bottom bar, so the space beside the narrower block (and
-          BrandBlock itself) still reaches the map. */}
-      <div className="absolute top-3 left-3 right-24 sm:right-auto z-10 flex flex-col items-start gap-2 pointer-events-none">
+          outgrow. On mobile, right-24 keeps it clear of the top-right icon
+          buttons while they show; the filter itself only shows md+
+          regardless. Click-through like the bottom bar, so the space beside
+          the narrower block (and BrandBlock itself) still reaches the map. */}
+      <div
+        className={`absolute top-3 left-3 ${hasToolbar ? "right-3" : "right-24"} sm:right-auto z-10 flex flex-col items-start gap-2 pointer-events-none`}
+      >
         <BrandBlock>
-          <WorldSummary summary={worldSummary} />
+          {worldSummary && <WorldSummary summary={worldSummary} />}
         </BrandBlock>
 
         {!loading && data.length > 0 && (
@@ -238,8 +253,11 @@ export default function App() {
         )}
       </div>
 
-      {/* -- Top-right controls: find (desktop) + theme toggle + info -- */}
-      <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+      {/* -- Top-right controls: find + theme toggle + info. Desktop only once
+          the mobile toolbar is up - its More tray holds theme and info. -- */}
+      <div
+        className={`absolute top-3 right-3 z-20 items-center gap-2 ${hasToolbar ? "hidden sm:flex" : "flex"}`}
+      >
         {!loading && data.length > 0 && (
           <button
             onClick={() => setOpenSheet("find")}
@@ -441,6 +459,23 @@ export default function App() {
                   chrome={false}
                   className="pl-1"
                 />
+              </Tray>
+            )}
+            {openSheet === "more" && (
+              <Tray key="more" label="More options" align="start" onClose={closeSheet}>
+                {/* The theme row leaves the tray open so the switch is visible;
+                    About hands over to the info panel. */}
+                <button onClick={toggleTheme} className={menuRowClass}>
+                  {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+                  {theme === "dark" ? "Light mode" : "Dark mode"}
+                </button>
+                <button
+                  onClick={() => { setOpenSheet(null); setShowInfo(true); }}
+                  className={menuRowClass}
+                >
+                  <Info size={18} />
+                  About this project
+                </button>
               </Tray>
             )}
           </AnimatePresence>
