@@ -409,7 +409,7 @@ export function CountryPanel({ country, onClose, historical }: CountryPanelProps
         >
           {/* Mobile grab handle - drag target for swipe-to-dismiss */}
           <div
-            className="md:hidden flex justify-center pt-3 pb-2 shrink-0 cursor-grab active:cursor-grabbing touch-none"
+            className="sm:hidden flex justify-center pt-3 pb-2 shrink-0 cursor-grab active:cursor-grabbing touch-none"
             onPointerDown={(e) => dragControls.start(e)}
           >
             <div className="h-1 w-10 rounded-full bg-fg/25" />
