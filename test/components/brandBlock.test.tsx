@@ -6,11 +6,10 @@ import { BrandBlock } from "../../src/components/BrandBlock.js";
 afterEach(cleanup);
 
 describe("BrandBlock", () => {
-  it("renders the title and tagline", () => {
+  it("renders the title", () => {
     render(<BrandBlock />);
 
     expect(screen.getByText("World News Sentiment")).toBeTruthy();
-    expect(screen.getByText("Emotional temperature of global headlines")).toBeTruthy();
   });
 
   it("renders children into the slot", () => {

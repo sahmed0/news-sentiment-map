@@ -5,7 +5,7 @@ interface BrandBlockProps {
   children?: ReactNode;
 }
 
-// App identity: title + tagline, visible at every breakpoint. The
+// App identity: the title, visible at every breakpoint. The
 // children slot holds the summary stat once that ships.
 export function BrandBlock({ children }: BrandBlockProps) {
   return (
@@ -24,9 +24,6 @@ export function BrandBlock({ children }: BrandBlockProps) {
       >
         World News Sentiment
       </h1>
-      <p className="text-[10px] sm:text-xs uppercase tracking-wide opacity-60 truncate mt-0.5">
-        Emotional temperature of global headlines
-      </p>
       {children}
     </div>
   );
