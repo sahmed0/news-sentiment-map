@@ -209,7 +209,8 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
 
     svgSel.call(zoomBehavior);
 
-    // Double-click to reset
+    // Double-click to reset. A click on a scored country still selects it, so
+    // the hint says to double-click the sea.
     svgSel.on("dblclick.zoom", () => {
       svgSel.transition().duration(500).call(
         zoomBehavior.transform,
@@ -456,14 +457,6 @@ export function WorldMap({ byCode, selectedCode, onSelectCountry, sentimentFilte
           )}
         </div>
       )}
-
-      {/* Zoom hint - the topology is bundled, so the map is never empty. */}
-      <p className="absolute bottom-20 right-4 sm:bottom-2 mb-[calc(env(safe-area-inset-bottom)+var(--map-bleed,0px))] text-[10px] opacity-60 pointer-events-none text-right">
-        {/* Keyed to the input device, not the width: a narrow desktop window
-            still scrolls, and a large touch tablet still pinches. */}
-        <span className="hidden pointer-coarse:inline">Pinch to zoom · Double-tap to reset</span>
-        <span className="pointer-coarse:hidden">Scroll to zoom · Double-click to reset</span>
-      </p>
     </div>
   );
 }

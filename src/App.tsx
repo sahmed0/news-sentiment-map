@@ -8,6 +8,7 @@ import { FirstVisitHint } from "./components/FirstVisitHint";
 import { BrandBlock } from "./components/BrandBlock";
 import { WorldSummary } from "./components/WorldSummary";
 import { Tray } from "./components/Tray";
+import { ZoomHint } from "./components/ZoomHint";
 import { MobileToolbar, type MobileToolbarItem } from "./components/MobileToolbar";
 import { TimeScrubber } from "./components/TimeScrubber";
 import { CountrySearch } from "./components/CountrySearch";
@@ -421,11 +422,14 @@ export default function App() {
         }`}
       >
         {!loading && data.length > 0 && (
-          <Legend
-            data={activeData}
-            lastUpdated={lastUpdated}
-            fromCache={fromCache}
-          />
+          <div className="hidden sm:flex flex-col items-start shrink-0">
+            <Legend
+              data={activeData}
+              lastUpdated={lastUpdated}
+              fromCache={fromCache}
+            />
+            <ZoomHint className="mt-1.5 pl-1" />
+          </div>
         )}
 
         {hasScrubber && (
@@ -446,7 +450,7 @@ export default function App() {
           bottom edge, and this also clears any open tray before a panel slides
           in. -- */}
       {!loading && data.length > 0 && !selectedCountry && !showInfo && (
-        <div className="sm:hidden absolute bottom-3 inset-x-3 z-30 mb-[env(safe-area-inset-bottom)] flex flex-col items-center gap-2 pointer-events-none">
+        <div className="sm:hidden absolute bottom-1.5 inset-x-3 z-30 mb-[env(safe-area-inset-bottom)] flex flex-col items-center gap-2 pointer-events-none">
           {/* One AnimatePresence for every tray: "wait" lets the open one
               leave before the next arrives, so they never stack. */}
           <AnimatePresence mode="wait" initial={false}>
@@ -497,6 +501,7 @@ export default function App() {
             )}
           </AnimatePresence>
           <MobileToolbar items={mobileToolbarItems} />
+          <ZoomHint className="-mt-1 text-center" />
         </div>
       )}
     </div>
