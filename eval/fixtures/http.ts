@@ -10,9 +10,14 @@
 // They exist to make output shapes checkable; they say nothing about the model.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { NEWSMTSC_URL } from "../datasets.js";
+import { NEWSMTSC_SPLITS, NEWSMTSC_URLS, type NewsmtscSplit } from "../datasets.js";
 
-const FIXTURE_JSONL = fileURLToPath(new URL("./newsmtsc-sample.jsonl", import.meta.url));
+// The first rows of each pinned split, verbatim.
+const FIXTURE_JSONL: Record<NewsmtscSplit, string> = {
+  test: fileURLToPath(new URL("./newsmtsc-sample.jsonl", import.meta.url)),
+  dev: fileURLToPath(new URL("./newsmtsc-dev-sample.jsonl", import.meta.url)),
+  train: fileURLToPath(new URL("./newsmtsc-train-sample.jsonl", import.meta.url)),
+};
 
 const AZURE_HOST = "api.cognitive.microsofttranslator.com";
 const HF_HOST = "router.huggingface.co";
@@ -90,8 +95,9 @@ function parseInputs(init: RequestInit | undefined): string[] {
 
 export function fixtureFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
   const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (href === NEWSMTSC_URL) {
-    return Promise.resolve(new Response(readFileSync(FIXTURE_JSONL, "utf8"), { status: 200 }));
+  const split = NEWSMTSC_SPLITS.find((s) => NEWSMTSC_URLS[s] === href);
+  if (split) {
+    return Promise.resolve(new Response(readFileSync(FIXTURE_JSONL[split], "utf8"), { status: 200 }));
   }
   const url = new URL(href);
   if (url.host === AZURE_HOST) return Promise.resolve(translateFixture(url, parseInputs(init)));
