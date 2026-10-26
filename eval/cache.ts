@@ -60,10 +60,19 @@ export async function cached<T>(
   task: string,
   payload: unknown,
   fn: () => Promise<T>,
+  { offline = false }: { offline?: boolean } = {},
 ): Promise<T> {
   const key = cacheKey(task, payload);
   const hit = readCache<T>(dir, key);
   if (hit !== null) return hit;
+  // Under --offline a miss means the cache no longer covers this run, so throw
+  // rather than quietly spend API credits.
+  if (offline) {
+    throw new Error(
+      `--offline: cache miss for ${task} (key ${key.slice(0, 12)}… in ${dir}). ` +
+        `Refusing to call out; drop --offline to fetch it and spend the quota.`,
+    );
+  }
   const value = await fn();
   writeCache(dir, key, value);
   return value;

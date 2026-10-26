@@ -75,6 +75,23 @@ describe("cached", () => {
     expect(readCache(dir, cacheKey("azure:to-fr", ["a"]))).toBeNull();
   });
 
+  it("throws on a miss under offline, before the work runs", async () => {
+    // A free re-run must never turn into a paid one.
+    const work = vi.fn().mockResolvedValue([0.25]);
+    await expect(cached(dir, "hf:score", { texts: ["a"] }, work, { offline: true })).rejects.toThrow(
+      /--offline: cache miss for hf:score/,
+    );
+    expect(work).not.toHaveBeenCalled();
+    expect(readCache(dir, cacheKey("hf:score", { texts: ["a"] }))).toBeNull();
+  });
+
+  it("serves a hit under offline as usual", async () => {
+    writeCache(dir, cacheKey("hf:score", { texts: ["a"] }), [0.25]);
+    const work = vi.fn();
+    await expect(cached(dir, "hf:score", { texts: ["a"] }, work, { offline: true })).resolves.toEqual([0.25]);
+    expect(work).not.toHaveBeenCalled();
+  });
+
   it("distinguishes batches by their exact contents", async () => {
     const work = vi.fn().mockResolvedValue(["x"]);
     await cached(dir, "azure:to-en", ["a"], work);
