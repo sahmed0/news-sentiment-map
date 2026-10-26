@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
+  accuracyOfConfusion,
+  balancedAccuracyOfConfusion,
   bucketAt,
   classificationReport,
   confusionMatrix,
   driftStats,
+  macroF1,
+  macroF1OfConfusion,
   pearson,
   productionBucket,
   thresholdSweep,
@@ -97,7 +101,31 @@ describe("classificationReport", () => {
     const empty = classificationReport([]);
     expect(empty.n).toBe(0);
     expect(empty.accuracy).toBe(0);
+    expect(empty.balancedAccuracy).toBe(0);
     expect(empty.macroF1).toBe(0);
+  });
+
+  it("reports balanced accuracy as the unweighted mean of the per-class recalls", () => {
+    // Unbalanced, so it differs from raw accuracy:
+    //   negative: 5 actual, 4 right (recall 0.8)
+    //   neutral:  2 actual, 1 right (recall 0.5)
+    //   positive: 1 actual, 0 right (recall 0)
+    const pairs = [
+      ...Array.from({ length: 4 }, () => pair("negative", "negative")),
+      pair("negative", "neutral"),
+      pair("neutral", "neutral"),
+      pair("neutral", "positive"),
+      pair("positive", "neutral"),
+    ];
+    const r = classificationReport(pairs);
+    expect(r.accuracy).toBe(0.625);
+    expect(r.balancedAccuracy).toBe(0.4333);
+    expect(balancedAccuracyOfConfusion(r.confusion)).toBeCloseTo(1.3 / 3, 12);
+    expect(accuracyOfConfusion(r.confusion)).toBe(5 / 8);
+  });
+
+  it("computes macroF1 over pairs exactly as macroF1OfConfusion over their matrix", () => {
+    expect(macroF1(FIXTURE)).toBe(macroF1OfConfusion(confusionMatrix(FIXTURE)));
   });
 });
 
@@ -111,7 +139,7 @@ describe("thresholdSweep", () => {
     const [narrow, wide] = thresholdSweep(scored, [0.1, 0.2]);
     // At +/-0.1 all three land in their true class; at +/-0.2 both poles collapse
     // to neutral, leaving only the neutral item correct.
-    expect(narrow).toEqual({ t: 0.1, accuracy: 1, macroF1: 1 });
+    expect(narrow).toEqual({ t: 0.1, accuracy: 1, balancedAccuracy: 1, macroF1: 1 });
     expect(wide.accuracy).toBeCloseTo(1 / 3, 4);
   });
 });
@@ -142,6 +170,7 @@ describe("driftStats", () => {
     expect(stats.maxAbsDelta).toBeCloseTo(0.9, 4);
     // signed deltas sorted: -0.6, -0.3, 0, 0.9 -> median (-0.3 + 0) / 2
     expect(stats.medianDelta).toBeCloseTo(-0.15, 4);
+    expect(stats.flips).toBe(2);
     expect(stats.flipRate).toBe(0.5);
     expect(stats.pearson).not.toBeNull();
   });
@@ -159,7 +188,9 @@ describe("driftStats", () => {
       meanAbsDelta: 0,
       medianDelta: 0,
       maxAbsDelta: 0,
+      flips: 0,
       flipRate: 0,
+      flipRateCI: [0, 0],
       pearson: null,
     });
   });
