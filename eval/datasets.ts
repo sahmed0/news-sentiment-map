@@ -46,7 +46,7 @@ export const MAX_TEXT_CHARS = 2000;
 // Fixed so every result is reproducible across machines and re-runs. It drives
 // the drift draw, every bootstrap and --limit sampling, so changing it changes
 // which sentences are measured and every interval.
-export const EVAL_SEED = 20260824;
+export const EVAL_SEED = 20261027;
 
 // One annotated (sentence, target) pair as stored in the source JSONL.
 export interface NewsmtscRow {
