@@ -1,86 +1,705 @@
 {
-  "generatedAt": "2026-08-24T08:19:02.958Z",
+  "formatVersion": 2,
+  "generatedAt": "2026-10-27T23:37:56.659Z",
   "model": "https://router.huggingface.co/hf-inference/models/cardiffnlp/twitter-roberta-base-sentiment-latest",
+  "modelRevision": "3216a57f2a0d9c45a2e6c20157c20c49fb4bf9c7",
   "dataset": {
-    "name": "NewsMTSC (rw, test split)",
-    "url": "https://raw.githubusercontent.com/fhamborg/NewsMTSC/6b838e00f54423c253806327a0ae24dbffa24c9e/NewsSentiment/experiments/default/datasets/newsmtsc-rw-hf/test.jsonl",
-    "filter": "sentence-level labels from targets that all share one polarity",
-    "seed": 20260824
+    "name": "NewsMTSC (rw: test + dev + train)",
+    "commit": "6b838e00f54423c253806327a0ae24dbffa24c9e",
+    "filter": "sentence-level labels from targets that all share one polarity; cross-split duplicates folded together; items over 2000 characters dropped",
+    "splits": {
+      "test": {
+        "url": "https://raw.githubusercontent.com/fhamborg/NewsMTSC/6b838e00f54423c253806327a0ae24dbffa24c9e/NewsSentiment/experiments/default/datasets/newsmtsc-rw-hf/test.jsonl",
+        "rows": 803,
+        "items": 724
+      },
+      "dev": {
+        "url": "https://raw.githubusercontent.com/fhamborg/NewsMTSC/6b838e00f54423c253806327a0ae24dbffa24c9e/NewsSentiment/experiments/default/datasets/newsmtsc-rw-hf/dev.jsonl",
+        "rows": 343,
+        "items": 312
+      },
+      "train": {
+        "url": "https://raw.githubusercontent.com/fhamborg/NewsMTSC/6b838e00f54423c253806327a0ae24dbffa24c9e/NewsSentiment/experiments/default/datasets/newsmtsc-rw-hf/train.jsonl",
+        "rows": 8739,
+        "items": 7331
+      }
+    },
+    "crossSplitDuplicates": {
+      "sentences": 4,
+      "kept": 3,
+      "dropped": 1
+    },
+    "overlong": {
+      "maxChars": 2000,
+      "dropped": 1
+    },
+    "size": 8367,
+    "classCounts": {
+      "negative": 3055,
+      "neutral": 3064,
+      "positive": 2248
+    }
   },
-  "n": 300,
+  "sample": {
+    "kind": "full"
+  },
+  "n": 8367,
   "unscored": 0,
   "production": {
-    "n": 300,
-    "accuracy": 0.6333,
-    "macroF1": 0.627,
+    "n": 8367,
+    "accuracy": 0.6681,
+    "balancedAccuracy": 0.6739,
+    "macroF1": 0.6601,
     "perClass": {
       "negative": {
-        "precision": 0.5705,
-        "recall": 0.85,
-        "f1": 0.6827,
-        "support": 100
+        "precision": 0.6485,
+        "recall": 0.8606,
+        "f1": 0.7396,
+        "support": 3055
       },
       "neutral": {
-        "precision": 0.5714,
-        "recall": 0.44,
-        "f1": 0.4972,
-        "support": 100
+        "precision": 0.66,
+        "recall": 0.4295,
+        "f1": 0.5204,
+        "support": 3064
       },
       "positive": {
-        "precision": 0.8243,
-        "recall": 0.61,
-        "f1": 0.7011,
-        "support": 100
+        "precision": 0.7094,
+        "recall": 0.7318,
+        "f1": 0.7204,
+        "support": 2248
       }
     },
     "confusion": {
       "negative": {
-        "negative": 85,
-        "neutral": 13,
-        "positive": 2
+        "negative": 2629,
+        "neutral": 317,
+        "positive": 109
       },
       "neutral": {
-        "negative": 45,
-        "neutral": 44,
-        "positive": 11
+        "negative": 1183,
+        "neutral": 1316,
+        "positive": 565
       },
       "positive": {
-        "negative": 19,
-        "neutral": 20,
-        "positive": 61
+        "negative": 242,
+        "neutral": 361,
+        "positive": 1645
       }
     }
+  },
+  "intervals": {
+    "accuracy": [
+      0.6579,
+      0.6781
+    ],
+    "balancedAccuracy": [
+      0.6643,
+      0.6833
+    ],
+    "macroF1": [
+      0.6498,
+      0.6701
+    ],
+    "perClassRecall": {
+      "negative": [
+        0.8478,
+        0.8724
+      ],
+      "neutral": [
+        0.4121,
+        0.4471
+      ],
+      "positive": [
+        0.7131,
+        0.7497
+      ]
+    }
+  },
+  "clusterCheck": {
+    "article": {
+      "clusters": 5802,
+      "accuracy": [
+        0.6578,
+        0.6785
+      ],
+      "balancedAccuracy": [
+        0.6644,
+        0.6835
+      ],
+      "macroF1": [
+        0.6498,
+        0.6704
+      ]
+    },
+    "story": {
+      "clusters": 4930,
+      "accuracy": [
+        0.6577,
+        0.6785
+      ],
+      "balancedAccuracy": [
+        0.6643,
+        0.6834
+      ],
+      "macroF1": [
+        0.6498,
+        0.6704
+      ]
+    }
+  },
+  "perSplit": {
+    "test": {
+      "report": {
+        "n": 724,
+        "accuracy": 0.6519,
+        "balancedAccuracy": 0.6532,
+        "macroF1": 0.6505,
+        "perClass": {
+          "negative": {
+            "precision": 0.6033,
+            "recall": 0.8391,
+            "f1": 0.7019,
+            "support": 261
+          },
+          "neutral": {
+            "precision": 0.6744,
+            "recall": 0.5035,
+            "f1": 0.5765,
+            "support": 288
+          },
+          "positive": {
+            "precision": 0.7397,
+            "recall": 0.6171,
+            "f1": 0.6729,
+            "support": 175
+          }
+        },
+        "confusion": {
+          "negative": {
+            "negative": 219,
+            "neutral": 35,
+            "positive": 7
+          },
+          "neutral": {
+            "negative": 112,
+            "neutral": 145,
+            "positive": 31
+          },
+          "positive": {
+            "negative": 32,
+            "neutral": 35,
+            "positive": 108
+          }
+        }
+      },
+      "intervals": {
+        "accuracy": [
+          0.6165,
+          0.6857
+        ],
+        "balancedAccuracy": [
+          0.6189,
+          0.6876
+        ],
+        "macroF1": [
+          0.6143,
+          0.6854
+        ],
+        "perClassRecall": {
+          "negative": [
+            0.7896,
+            0.8787
+          ],
+          "neutral": [
+            0.4461,
+            0.5608
+          ],
+          "positive": [
+            0.5433,
+            0.6859
+          ]
+        }
+      }
+    },
+    "dev": {
+      "report": {
+        "n": 312,
+        "accuracy": 0.6442,
+        "balancedAccuracy": 0.6384,
+        "macroF1": 0.6257,
+        "perClass": {
+          "negative": {
+            "precision": 0.6485,
+            "recall": 0.8843,
+            "f1": 0.7483,
+            "support": 121
+          },
+          "neutral": {
+            "precision": 0.6627,
+            "recall": 0.44,
+            "f1": 0.5288,
+            "support": 125
+          },
+          "positive": {
+            "precision": 0.6094,
+            "recall": 0.5909,
+            "f1": 0.6,
+            "support": 66
+          }
+        },
+        "confusion": {
+          "negative": {
+            "negative": 107,
+            "neutral": 12,
+            "positive": 2
+          },
+          "neutral": {
+            "negative": 47,
+            "neutral": 55,
+            "positive": 23
+          },
+          "positive": {
+            "negative": 11,
+            "neutral": 16,
+            "positive": 39
+          }
+        }
+      },
+      "intervals": {
+        "accuracy": [
+          0.5896,
+          0.6953
+        ],
+        "balancedAccuracy": [
+          0.5849,
+          0.6908
+        ],
+        "macroF1": [
+          0.5673,
+          0.6794
+        ],
+        "perClassRecall": {
+          "negative": [
+            0.8151,
+            0.9298
+          ],
+          "neutral": [
+            0.3561,
+            0.5275
+          ],
+          "positive": [
+            0.4705,
+            0.7013
+          ]
+        }
+      }
+    },
+    "train": {
+      "report": {
+        "n": 7331,
+        "accuracy": 0.6707,
+        "balancedAccuracy": 0.6763,
+        "macroF1": 0.6615,
+        "perClass": {
+          "negative": {
+            "precision": 0.6531,
+            "recall": 0.8616,
+            "f1": 0.743,
+            "support": 2673
+          },
+          "neutral": {
+            "precision": 0.658,
+            "recall": 0.421,
+            "f1": 0.5135,
+            "support": 2651
+          },
+          "positive": {
+            "precision": 0.7103,
+            "recall": 0.7464,
+            "f1": 0.7279,
+            "support": 2007
+          }
+        },
+        "confusion": {
+          "negative": {
+            "negative": 2303,
+            "neutral": 270,
+            "positive": 100
+          },
+          "neutral": {
+            "negative": 1024,
+            "neutral": 1116,
+            "positive": 511
+          },
+          "positive": {
+            "negative": 199,
+            "neutral": 310,
+            "positive": 1498
+          }
+        }
+      },
+      "intervals": {
+        "accuracy": [
+          0.6599,
+          0.6814
+        ],
+        "balancedAccuracy": [
+          0.6663,
+          0.6862
+        ],
+        "macroF1": [
+          0.6506,
+          0.6723
+        ],
+        "perClassRecall": {
+          "negative": [
+            0.848,
+            0.8742
+          ],
+          "neutral": [
+            0.4023,
+            0.4399
+          ],
+          "positive": [
+            0.7269,
+            0.7649
+          ]
+        }
+      }
+    }
+  },
+  "baselines": {
+    "majorityClass": {
+      "label": "neutral",
+      "accuracy": 0.3662,
+      "balancedAccuracy": 0.3333,
+      "macroF1": 0.1787
+    },
+    "afinn": {
+      "n": 8367,
+      "accuracy": 0.5377,
+      "balancedAccuracy": 0.5436,
+      "macroF1": 0.5402,
+      "perClass": {
+        "negative": {
+          "precision": 0.6102,
+          "recall": 0.5339,
+          "f1": 0.5695,
+          "support": 3055
+        },
+        "neutral": {
+          "precision": 0.4857,
+          "recall": 0.4925,
+          "f1": 0.4891,
+          "support": 3064
+        },
+        "positive": {
+          "precision": 0.5253,
+          "recall": 0.6045,
+          "f1": 0.5622,
+          "support": 2248
+        }
+      },
+      "confusion": {
+        "negative": {
+          "negative": 1631,
+          "neutral": 965,
+          "positive": 459
+        },
+        "neutral": {
+          "negative": 786,
+          "neutral": 1509,
+          "positive": 769
+        },
+        "positive": {
+          "negative": 256,
+          "neutral": 633,
+          "positive": 1359
+        }
+      }
+    },
+    "afinnIntervals": {
+      "accuracy": [
+        0.527,
+        0.5484
+      ],
+      "balancedAccuracy": [
+        0.533,
+        0.5545
+      ],
+      "macroF1": [
+        0.5295,
+        0.5509
+      ],
+      "perClassRecall": {
+        "negative": [
+          0.5162,
+          0.5515
+        ],
+        "neutral": [
+          0.4748,
+          0.5102
+        ],
+        "positive": [
+          0.5842,
+          0.6246
+        ]
+      }
+    },
+    "modelOverAfinn": {
+      "accuracy": 0.1304,
+      "accuracyCI": [
+        0.1178,
+        0.1431
+      ],
+      "balancedAccuracy": 0.1303,
+      "balancedAccuracyCI": [
+        0.118,
+        0.1426
+      ],
+      "macroF1": 0.1199,
+      "macroF1CI": [
+        0.1071,
+        0.1324
+      ],
+      "adjusted": null
+    }
+  },
+  "bootstrap": {
+    "b": 10000,
+    "seed": 20261027,
+    "method": "percentile",
+    "sweepAdjustedAlpha": 0.01
   },
   "thresholdSweep": [
     {
       "t": 0.05,
-      "accuracy": 0.62,
-      "macroF1": 0.5956
+      "accuracy": 0.6397,
+      "balancedAccuracy": 0.6539,
+      "macroF1": 0.6095,
+      "vsShipped": {
+        "accuracy": -0.0284,
+        "accuracyCI": [
+          -0.035,
+          -0.0218
+        ],
+        "balancedAccuracy": -0.02,
+        "balancedAccuracyCI": [
+          -0.026,
+          -0.014
+        ],
+        "macroF1": -0.0506,
+        "macroF1CI": [
+          -0.058,
+          -0.0433
+        ],
+        "adjusted": {
+          "alpha": 0.01,
+          "accuracyCI": [
+            -0.0371,
+            -0.0198
+          ],
+          "balancedAccuracyCI": [
+            -0.028,
+            -0.0121
+          ],
+          "macroF1CI": [
+            -0.0602,
+            -0.0409
+          ],
+          "established": {
+            "accuracy": true,
+            "balancedAccuracy": true,
+            "macroF1": true
+          }
+        }
+      }
     },
     {
       "t": 0.1,
-      "accuracy": 0.6333,
-      "macroF1": 0.627
+      "accuracy": 0.6681,
+      "balancedAccuracy": 0.6739,
+      "macroF1": 0.6601,
+      "vsShipped": null
     },
     {
       "t": 0.15,
-      "accuracy": 0.64,
-      "macroF1": 0.6384
+      "accuracy": 0.6766,
+      "balancedAccuracy": 0.6768,
+      "macroF1": 0.6747,
+      "vsShipped": {
+        "accuracy": 0.0085,
+        "accuracyCI": [
+          0.0031,
+          0.0139
+        ],
+        "balancedAccuracy": 0.0028,
+        "balancedAccuracyCI": [
+          -0.0024,
+          0.008
+        ],
+        "macroF1": 0.0146,
+        "macroF1CI": [
+          0.0089,
+          0.0201
+        ],
+        "adjusted": {
+          "alpha": 0.01,
+          "accuracyCI": [
+            0.0014,
+            0.0154
+          ],
+          "balancedAccuracyCI": [
+            -0.0039,
+            0.0097
+          ],
+          "macroF1CI": [
+            0.0071,
+            0.022
+          ],
+          "established": {
+            "accuracy": true,
+            "balancedAccuracy": false,
+            "macroF1": true
+          }
+        }
+      }
     },
     {
       "t": 0.2,
-      "accuracy": 0.63,
-      "macroF1": 0.6277
+      "accuracy": 0.6741,
+      "balancedAccuracy": 0.6701,
+      "macroF1": 0.6742,
+      "vsShipped": {
+        "accuracy": 0.006,
+        "accuracyCI": [
+          -0.0013,
+          0.0133
+        ],
+        "balancedAccuracy": -0.0038,
+        "balancedAccuracyCI": [
+          -0.0106,
+          0.003
+        ],
+        "macroF1": 0.014,
+        "macroF1CI": [
+          0.0066,
+          0.0213
+        ],
+        "adjusted": {
+          "alpha": 0.01,
+          "accuracyCI": [
+            -0.0037,
+            0.0154
+          ],
+          "balancedAccuracyCI": [
+            -0.0128,
+            0.0053
+          ],
+          "macroF1CI": [
+            0.0042,
+            0.0238
+          ],
+          "established": {
+            "accuracy": false,
+            "balancedAccuracy": false,
+            "macroF1": true
+          }
+        }
+      }
     },
     {
       "t": 0.25,
-      "accuracy": 0.61,
-      "macroF1": 0.6071
+      "accuracy": 0.6698,
+      "balancedAccuracy": 0.6618,
+      "macroF1": 0.67,
+      "vsShipped": {
+        "accuracy": 0.0017,
+        "accuracyCI": [
+          -0.0069,
+          0.0102
+        ],
+        "balancedAccuracy": -0.0122,
+        "balancedAccuracyCI": [
+          -0.0201,
+          -0.0043
+        ],
+        "macroF1": 0.0099,
+        "macroF1CI": [
+          0.0012,
+          0.0184
+        ],
+        "adjusted": {
+          "alpha": 0.01,
+          "accuracyCI": [
+            -0.0099,
+            0.013
+          ],
+          "balancedAccuracyCI": [
+            -0.0227,
+            -0.002
+          ],
+          "macroF1CI": [
+            -0.0018,
+            0.0208
+          ],
+          "established": {
+            "accuracy": false,
+            "balancedAccuracy": true,
+            "macroF1": false
+          }
+        }
+      }
     },
     {
       "t": 0.3,
-      "accuracy": 0.58,
-      "macroF1": 0.5747
+      "accuracy": 0.6608,
+      "balancedAccuracy": 0.6501,
+      "macroF1": 0.6606,
+      "vsShipped": {
+        "accuracy": -0.0073,
+        "accuracyCI": [
+          -0.017,
+          0.0022
+        ],
+        "balancedAccuracy": -0.0239,
+        "balancedAccuracyCI": [
+          -0.0326,
+          -0.0153
+        ],
+        "macroF1": 0.0005,
+        "macroF1CI": [
+          -0.009,
+          0.0098
+        ],
+        "adjusted": {
+          "alpha": 0.01,
+          "accuracyCI": [
+            -0.0203,
+            0.0054
+          ],
+          "balancedAccuracyCI": [
+            -0.0353,
+            -0.0128
+          ],
+          "macroF1CI": [
+            -0.0124,
+            0.0125
+          ],
+          "established": {
+            "accuracy": false,
+            "balancedAccuracy": true,
+            "macroF1": false
+          }
+        }
+      }
     }
-  ]
+  ],
+  "spend": {
+    "hfRequests": 0,
+    "hfRows": 0,
+    "azureRequests": 0,
+    "azureChars": 0
+  }
 }
