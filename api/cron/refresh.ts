@@ -31,10 +31,8 @@ import type { TickSummary } from "../../shared/types.js";
 // a normal tick well inside the TTL.
 const LOCK_TTL = 300; // seconds
 
-// Fluid Compute is enabled, so Hobby allows up to 300 s. We use the full ceiling
-// as a safety net; the per-tick batch caps (NEWSDATA_MAX_PER_TICK /
-// GNEWS_MAX_PER_TICK) and per-request fetch timeouts keep a normal tick far
-// shorter than this.
+// Fluid Compute lets Hobby run up to 300 s; we take the full ceiling as a
+// safety net. TICK_BUDGET_MS (240 s) is what bounds the pipeline.
 export const config = { maxDuration: 300 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

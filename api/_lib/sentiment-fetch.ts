@@ -7,9 +7,10 @@ import { headlineStats } from "../../shared/stats.js";
 import type { Article, CountryDef, CountryResult, RawArticle } from "../../shared/types.js";
 
 // utcOffset = standard-time offset (hours) of the country's primary population
-// centre, used to fire each country's daily refresh near 6 am local. Half-hour
-// zones are rounded to the nearest hour; DST drift of +-1 h is tolerated since
-// NewsData.io's free tier already lags ~12 h, so exact timing doesn't matter.
+// centre, used to fire each country's daily refresh near 6 am local.
+// Half-hour zones are rounded to a whole hour because targetUtcHour is compared
+// with an integer UTC hour: India (+5:30) is stored as +6 on purpose. DST is
+// ignored; NewsData's free tier lags ~12 h anyway.
 //
 // lang = ISO 639-1 code(s) for the country's news languages: one code for
 // high-priority countries, a comma-joined list for low-priority ones (filtered by
