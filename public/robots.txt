@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://news.sajidahmed.co.uk/sitemap.xml

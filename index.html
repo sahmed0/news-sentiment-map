@@ -9,6 +9,7 @@
     <link rel="manifest" href="favicon/site.webmanifest">
     <title>World News Sentiment | Sajid Ahmed</title>
     <meta name="description" content="An interactive world map coloured by the sentiment of each country's latest news headlines, refreshed hourly from live news APIs and scored with a RoBERTa sentiment model." />
+    <link rel="canonical" href="https://news.sajidahmed.co.uk/" />
 
     <!-- Open Graph / Twitter Card - so sharing the link (LinkedIn, Twitter, Slack)
          renders a real preview card instead of a bare link. og:image must be an
@@ -24,6 +25,24 @@
     <meta name="twitter:title" content="World News Sentiment" />
     <meta name="twitter:description" content="The emotional temperature of global headlines - an interactive world map of live news sentiment, refreshed hourly." />
     <meta name="twitter:image" content="https://news.sajidahmed.co.uk/og-image.jpg" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "World News Sentiment",
+        "url": "https://news.sajidahmed.co.uk/",
+        "description": "An interactive world map coloured by the sentiment of each country's latest news headlines, refreshed hourly from live news APIs and scored with a RoBERTa sentiment model.",
+        "applicationCategory": "DataVisualization",
+        "isAccessibleForFree": true,
+        "author": {
+          "@type": "Person",
+          "name": "Sajid Ahmed",
+          "url": "https://sajidahmed.co.uk",
+          "sameAs": ["https://sajidahmed.co.uk", "https://github.com/sahmed0"]
+        }
+      }
+    </script>
 
     <!-- Apply the saved theme to <html> before paint so the html/body background
          (which fills the iOS safe-area below the bottom bar) matches the map and
@@ -41,7 +60,11 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" />
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Text for crawlers that don't run JS. React replaces it on mount. -->
+    <div id="root">
+      <h1 class="sr-only">World News Sentiment</h1>
+      <p class="sr-only">An interactive world map coloured by the sentiment of each country's latest news headlines, refreshed hourly and scored with a RoBERTa sentiment model.</p>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
