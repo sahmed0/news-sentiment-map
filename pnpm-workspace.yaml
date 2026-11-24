@@ -1,6 +1,15 @@
 allowBuilds:
   esbuild: true
 
+overrides:
+  '@fastify/busboy@<3.2.2': ^3.2.2
+  ajv@>=7.0.0-alpha.0 <8.18.0: ^8.18.0
+  glob@>=9.0.0 <=14.0.1: ^14.0.2
+  minimatch@>=7.0.0 <11.0.1: ^11.0.1
+  path-to-regexp@>=4.0.0 <6.3.0: ^6.3.0
+  undici@<6.28.1: ^6.28.1
+  undici@>=4.0.0 <6.29.1: ^6.29.1
+
 updateConfig:
   ignoreDependencies:
     - typescript # prevent bump to v7 which breaks the vercel deployment
