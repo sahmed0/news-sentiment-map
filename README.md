@@ -142,6 +142,7 @@ Full method, tables and limitations: [eval/RESULTS.md](eval/RESULTS.md).
 pnpm install
 pnpm dev          # frontend on http://localhost:5173
 pnpm test         # vitest run
+pnpm test:eval-output  # re-derive the committed eval/out results (slow)
 pnpm typecheck    # tsc --noEmit
 pnpm lint
 pnpm build        # production build (pnpm preview to serve it)

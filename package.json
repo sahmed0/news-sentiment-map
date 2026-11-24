@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:eval-output": "vitest run --config vitest.eval-output.config.ts",
     "eval": "tsx eval/run.ts"
   },
   "dependencies": {

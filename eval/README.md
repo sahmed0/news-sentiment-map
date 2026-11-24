@@ -188,4 +188,4 @@ The HuggingFace dataset repo `fhamborg/news_sentiment_newsmtsc` is a *loading sc
 | `data/` | downloads, cache, dry-run and smoke-run output (gitignored) |
 | `out/` | results |
 
-Tests live in `test/eval/` and run with the rest of the suite (`pnpm test`). They never touch the network: the dry-run router throws on any host that is not the dataset, Azure or HuggingFace.
+Tests live in `test/eval/` and run with the rest of the suite (`pnpm test`), except `committed-output.test.ts`. That one re-derives every interval in `out/` and is slow, so it runs with `pnpm test:eval-output` and in its own CI job. No test touches the network: the dry-run router throws on any host that is not the dataset, Azure or HuggingFace.
