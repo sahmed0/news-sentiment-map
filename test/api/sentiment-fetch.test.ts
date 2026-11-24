@@ -14,7 +14,7 @@ import {
   TICK_BUDGET_MS,
   type FetchStats,
 } from "../../api/_lib/sentiment-fetch.js";
-import { persistCountries, refundCounts, HISTORY_KEY } from "../../api/_lib/refresh-core.js";
+import { persistCountries, refundCounts, extraCharges, HISTORY_KEY } from "../../api/_lib/refresh-core.js";
 import { createFakeRedis } from "../helpers/fakeRedis.js";
 
 // ---- Response / fetch helpers -------------------------------------------------
@@ -444,6 +444,31 @@ describe("fetchCountries - GNews routing for high-priority countries", () => {
     expect(results[0].articles).toHaveLength(0);
     expect(results[0].score).toBeNull();
   });
+
+  it("keeps the unanswered count through a later 429, and charges it on top of the 200", async () => {
+    vi.useFakeTimers();
+    let call = 0;
+    const fetchFn = installFetch({
+      gnews: () => {
+        call += 1;
+        if (call === 1) throw netError("ECONNRESET");
+        if (call === 2) return makeResponse(429, { errors: ["rate"] }, { "retry-after": "1" });
+        return gnewsOk([{ title: "Back", url: "http://us", publishedAt: null }]);
+      },
+      hfEng: hfPositive,
+    });
+
+    const promise = fetchCountries([{ code: "us", name: "United States", lang: "en" }]);
+    await vi.advanceTimersByTimeAsync(120000);
+    const results = await promise;
+
+    expect(fetchFn.mock.calls.filter(([u]) => u.startsWith("https://gnews.io/"))).toHaveLength(3);
+    expect(results[0].score).toBeCloseTo(0.8, 5);
+    // Dropped reply 1 credit, 429 free, 200 1 credit: one more than reserved.
+    expect(results[0].unanswered).toBe(1);
+    expect(extraCharges(results)).toEqual({ newsdata: 0, gnews: 1 });
+    expect(refundCounts(results)).toEqual({ newsdata: 0, gnews: 0 });
+  });
 });
 
 // ---- Error handling & Retry-After --------------------------------------------
@@ -507,6 +532,9 @@ describe("fetchCountries - NewsData error handling & retry", () => {
 
     expect(fetchFn.mock.calls.filter(([u]) => u.startsWith("https://newsdata.io/"))).toHaveLength(2);
     expect(results[0].score).toBeCloseTo(0.8, 5);
+    // The dropped request may have been billed, so it costs a credit as well as the 200.
+    expect(results[0].unanswered).toBe(1);
+    expect(extraCharges(results)).toEqual({ newsdata: 1, gnews: 0 });
   });
 
   it("marks an unsupported country (HTTP 422 UnsupportedFilter) without throwing", async () => {
@@ -794,8 +822,11 @@ describe("fetchCountries - tick time budget", () => {
     expect(statusOf(stats, "gm")).toBe("deadline_skipped");
     expect(results.every((r) => r.articles.length === 0 && r.score === null)).toBe(true);
     expect(console.warn).toHaveBeenCalledWith("[Tick] budget_exhausted stage=fetch skipped=1");
-    // All three are refunded: two timeouts (refunded as ambiguous) and one request never sent.
-    expect(refundCounts(results)).toEqual({ newsdata: 3, gnews: 0 });
+    // Each timed-out request may have been billed, so each costs a credit (dz 3,
+    // zm 1). Only gm, never sent, is refunded, and dz's two retries are extra.
+    expect(results.map((r) => r.unanswered)).toEqual([3, 1, 0]);
+    expect(refundCounts(results)).toEqual({ newsdata: 1, gnews: 0 });
+    expect(extraCharges(results)).toEqual({ newsdata: 2, gnews: 0 });
   });
 
   it("ends an HF outage after a healthy 20-country fetch by the budget (was 434 s)", async () => {
@@ -837,6 +868,7 @@ describe("fetchCountries - tick time budget", () => {
     // Served, so nothing is refunded, and every country is scorable-but-unscored:
     // untouched, so the next tick retries it.
     expect(refundCounts(results)).toEqual({ newsdata: 0, gnews: 0 });
+    expect(extraCharges(results)).toEqual({ newsdata: 0, gnews: 0 });
     const redis = createFakeRedis();
     const day = 500;
     expect(await persistCountries(redis, results, day)).toEqual([]);

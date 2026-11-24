@@ -13,6 +13,7 @@ vi.mock("../../api/_lib/refresh-core.js", () => ({
   reserveCredits: vi.fn(),
   releaseCredits: vi.fn(),
   refundCounts: vi.fn(() => ({ newsdata: 0, gnews: 0 })),
+  extraCharges: vi.fn(() => ({ newsdata: 0, gnews: 0 })),
   persistCountries: vi.fn(),
   rebuildAggregate: vi.fn(),
   refreshWorldHistory: vi.fn(),
@@ -28,6 +29,7 @@ import {
   reserveCredits,
   releaseCredits,
   refundCounts,
+  extraCharges,
   persistCountries,
   rebuildAggregate,
   refreshWorldHistory,
@@ -155,6 +157,7 @@ describe("POST /api/cron/refresh - orchestration", () => {
     const fetched: any = [{ code: "us", score: 0.3, articles: [] }];
     vi.mocked(fetchCountries).mockResolvedValue(fetched);
     vi.mocked(refundCounts).mockReturnValue({ newsdata: 0, gnews: 0 });
+    vi.mocked(extraCharges).mockReturnValue({ newsdata: 2, gnews: 1 });
     vi.mocked(releaseCredits).mockResolvedValue(undefined);
     vi.mocked(persistCountries).mockResolvedValue(["us"]);
     vi.mocked(rebuildAggregate).mockResolvedValue({ count: 1, dupSets: 0, sharedFeed: 0 });
@@ -166,9 +169,15 @@ describe("POST /api/cron/refresh - orchestration", () => {
     expect(res.body).toMatchObject({ ok: true, refreshed: ["us"], attempted: 1, aggregate: 1 });
     expect(reserveCredits).toHaveBeenCalledWith(redis, selection.counts, selection);
     expect(fetchCountries).toHaveBeenCalledWith(selection.subset, expect.any(Object));
-    // Refund runs between fetch and persist, charged against the same selection ledger.
+    // Settling happens between fetch and persist, on the same ledger. Retries are
+    // charged before refunds, so a crash in between overcounts.
+    expect(extraCharges).toHaveBeenCalledWith(fetched);
+    expect(reserveCredits).toHaveBeenLastCalledWith(redis, { newsdata: 2, gnews: 1 }, selection);
     expect(refundCounts).toHaveBeenCalledWith(fetched);
     expect(releaseCredits).toHaveBeenCalledWith(redis, { newsdata: 0, gnews: 0 }, selection);
+    expect(vi.mocked(reserveCredits).mock.invocationCallOrder[1])
+      .toBeLessThan(vi.mocked(releaseCredits).mock.invocationCallOrder[0]);
+    expect(res.body.debug.extraCharged).toEqual({ newsdata: 2, gnews: 1 });
     expect(persistCountries).toHaveBeenCalled();
     expect(rebuildAggregate).toHaveBeenCalled();
     // finally → lock released

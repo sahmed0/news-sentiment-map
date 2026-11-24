@@ -35,6 +35,7 @@ export interface CountryResult {
   name: string;
   score: number | null; // average of scored headlines
   status: string | undefined; // fetch outcome, e.g. "ok" | "timeout" | "http_500"
+  unanswered?: number; // fetch attempts that got no reply; read by the credit ledger
   articles: Article[];
   fetchedAt: string; // ISO
   highPriority?: boolean;

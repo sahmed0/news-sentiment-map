@@ -14,6 +14,7 @@ import {
   reserveCredits,
   releaseCredits,
   refundCounts,
+  extraCharges,
   persistCountries,
   rebuildAggregate,
   refreshWorldHistory,
@@ -160,8 +161,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       fetchOpts = { budgetMs: TICK_BUDGET_MS - since(tProbe) };
     }
 
-    // Reserve credits up front so a mid-tick crash can never under-count spend.
-    // Each provider is charged its own count (see selection.counts).
+    // Reserve one credit per country before fetching, so a crash mid-tick still
+    // counts every first request.
     await reserveCredits(redis, selection.counts, selection);
 
     log("Tick", "refreshing", {
@@ -177,8 +178,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await redis.set(SCORING_DOWN_KEY, new Date().toISOString(), { nx: true });
       err("Tick", "scoring_failed", { headlines: stats.counts?.headlines });
     }
-    // Refund credits reserved for fetches the provider probably never served (see
-    // isRefundableStatus). A malformed 200 was served, so it keeps its charge.
+    // Settle up (see creditsSpent): charge for retries, then refund fetches that
+    // cost nothing. Charging first means a crash in between overcounts.
+    const extra = extraCharges(results);
+    await reserveCredits(redis, extra, selection);
     const refunded = refundCounts(results);
     await releaseCredits(redis, refunded, selection);
     const refreshed = await persistCountries(redis, results, selection.dayId);
@@ -224,6 +227,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         timings: stats.timings,
         counts: stats.counts,
         refunded,
+        extraCharged: extra,
         selection: diag,
         countries: stats.countries,
         worldHistory,

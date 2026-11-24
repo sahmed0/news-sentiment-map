@@ -80,8 +80,8 @@ describe("cron tick that throws after reserveCredits", () => {
     expect(gnews).toBeGreaterThan(0);
     expect(newsdata).toBeGreaterThan(0);
 
-    // Still charged: the documented over-count direction. A crash after the
-    // reservation must never let the ledger under-count what may have been spent.
+    // A crash after reserving leaves every credit charged, even for countries
+    // never requested.
     expect(redis._store.get(ND_CREDIT_DAY_KEY(dayId(NOW)))).toBe(newsdata);
     expect(redis._store.get(GN_CREDIT_DAY_KEY(gnDayId(NOW)))).toBe(gnews);
 

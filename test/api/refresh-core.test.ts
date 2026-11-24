@@ -10,6 +10,8 @@ import {
   reserveCredits,
   releaseCredits,
   refundCounts,
+  extraCharges,
+  creditsSpent,
   persistCountries,
   isTransientStatus,
   isRefundableStatus,
@@ -314,17 +316,48 @@ describe("reserveCredits", () => {
   });
 });
 
-describe("releaseCredits + refundCounts", () => {
-  it("refundCounts counts only refundable fetches, split by provider tier", () => {
+describe("creditsSpent", () => {
+  it("charges one credit per unanswered attempt, plus one for a billed final reply", () => {
+    expect(creditsSpent({ code: "us", status: "ok" })).toBe(1);
+    expect(creditsSpent({ code: "us", status: "ok", unanswered: 2 })).toBe(3); // two timeouts, then a 200
+    expect(creditsSpent({ code: "us", status: "timeout", unanswered: 3 })).toBe(3);
+    expect(creditsSpent({ code: "us", status: "network_error", unanswered: 1 })).toBe(1);
+    expect(creditsSpent({ code: "us", status: "rate_limited", unanswered: 1 })).toBe(1); // the 429s are free
+    expect(creditsSpent({ code: "us", status: "rate_limited" })).toBe(0);
+    expect(creditsSpent({ code: "us", status: "http_503" })).toBe(0);
+    expect(creditsSpent({ code: "us", status: "deadline_skipped" })).toBe(0);
+    expect(creditsSpent({ code: "us", status: "api_error" })).toBe(1); // a served 200
+  });
+
+  it("counts a timeout or connection error as at least one unanswered attempt", () => {
+    expect(creditsSpent({ code: "us", status: "timeout" })).toBe(1);
+    expect(creditsSpent({ code: "us", status: "network_error", unanswered: 0 })).toBe(1);
+  });
+});
+
+describe("releaseCredits + refundCounts + extraCharges", () => {
+  it("refundCounts counts only fetches that cost nothing, split by provider tier", () => {
     const lowCode = COUNTRIES.find((c) => !HIGH_PRIORITY_CODES.has(c.code))!.code;
     const results = [
-      { code: "us", status: "timeout" },           // transient, high tier → GNews
+      { code: "us", status: "timeout" },           // no reply, may be billed, no refund
       { code: "gb", status: "ok" },                // success, no refund
-      { code: lowCode, status: "rate_limited" },   // transient, low tier → NewsData
+      { code: lowCode, status: "rate_limited" },   // free 429s, low tier → NewsData
       { code: "fr", status: "empty" },             // terminal, no refund
       { code: "de", status: "unsupported" },       // terminal, no refund
+      { code: "jp", status: "http_503" },          // free 5xx, high tier → GNews
     ];
     expect(refundCounts(results)).toEqual({ gnews: 1, newsdata: 1 });
+  });
+
+  it("extraCharges counts the credits beyond each country's reserved one", () => {
+    const lowCode = COUNTRIES.find((c) => !HIGH_PRIORITY_CODES.has(c.code))!.code;
+    const results = [
+      { code: "us", status: "timeout", unanswered: 3 },     // 3 billed, 1 reserved → 2 extra
+      { code: lowCode, status: "ok", unanswered: 1 },        // 2 billed → 1 extra
+      { code: "gb", status: "ok" },                          // 1 billed → none
+      { code: "fr", status: "deadline_skipped" },            // 0 billed → refunded, not negative extra
+    ];
+    expect(extraCharges(results)).toEqual({ gnews: 2, newsdata: 1 });
   });
 
   // One low-priority (NewsData) fetch per status, so each count reads directly.
@@ -336,10 +369,10 @@ describe("releaseCredits + refundCounts", () => {
     expect(refundFor("invalid_json")).toBe(0);
   });
 
-  it("refunds statuses the provider probably never served", () => {
-    for (const s of ["timeout", "network_error", "rate_limited", "http_503"]) {
-      expect(refundFor(s)).toBe(1);
-    }
+  it("refunds final outcomes that are not billed, but not ones with no reply", () => {
+    for (const s of ["rate_limited", "http_503"]) expect(refundFor(s)).toBe(1);
+    // A request that timed out or lost its connection may still have been billed.
+    for (const s of ["timeout", "network_error"]) expect(refundFor(s)).toBe(0);
   });
 
   it("refunds the thrown-exception status fetchBatch records as \"error\"", () => {
@@ -564,7 +597,7 @@ describe("recordTick", () => {
 });
 
 describe("isRefundableStatus", () => {
-  it("is narrower than the retry set: malformed-200 statuses retry but are not refunded", () => {
+  it("is narrower than the retry set: malformed-200 statuses retry but are billed", () => {
     for (const s of ["timeout", "network_error", "rate_limited", "error", "deadline_skipped", "http_500", "http_503"]) {
       expect(isRefundableStatus(s)).toBe(true);
     }

@@ -292,10 +292,10 @@ export async function selectDueCountries(redis: RedisLike, now: Date = new Date(
   return result;
 }
 
-// Reserve credits BEFORE fetching so a crash mid-tick can't under-count. `counts`
-// is { newsdata, gnews } - the number of HTTP requests about to be made to each
-// provider (one per country) - charged to that provider's own ledger. NewsData uses
-// the shifted `dayId`; GNews uses its own midnight-UTC `gnDayId` (see selectDueCountries).
+// Add `counts` credits to each provider's daily ledger. The cron calls this
+// before fetching (one credit per country) and again after (for retries, see
+// extraCharges). NewsData uses the shifted `dayId`, GNews its midnight-UTC
+// `gnDayId` (see selectDueCountries).
 export async function reserveCredits(redis: RedisLike, counts: ProviderCounts, { dayId: day, gnDayId: gnDay }: { dayId: number; gnDayId: number }): Promise<void> {
   const nd = toInt(counts?.newsdata);
   const gn = toInt(counts?.gnews);
@@ -312,16 +312,8 @@ export async function reserveCredits(redis: RedisLike, counts: ProviderCounts, {
   await p.exec();
 }
 
-// Give back the credits reserved for fetches the provider probably never served:
-// no response, a 429 or 5xx rejection, a throw, or a timeout (ambiguous, refunded
-// anyway). Otherwise the daily slack is spent on failures instead of recovery.
-// Everything else was served and counts against the provider's real quota, so it
-// keeps its charge: terminal outcomes (empty/unsupported/4xx), scorable-but-
-// unscored fetches, and api_error/invalid_json, which only follow an HTTP 200
-// with a malformed body. That last pair is still retried (isTransientStatus) -
-// retry asks "might it work next time?", refund asks "were we charged?", and the
-// answers differ. See REFUNDABLE_STATUSES. Mirrors reserveCredits but only
-// touches the daily ledgers (the keys already carry a TTL from the reservation).
+// Refund the reserved credit of each country whose fetch cost nothing (see
+// creditsSpent). The ledger keys already have a TTL from the reservation.
 export async function releaseCredits(redis: RedisLike, counts: ProviderCounts, { dayId: day, gnDayId: gnDay }: { dayId: number; gnDayId: number }): Promise<void> {
   const nd = toInt(counts?.newsdata);
   const gn = toInt(counts?.gnews);
@@ -332,23 +324,41 @@ export async function releaseCredits(redis: RedisLike, counts: ProviderCounts, {
   await p.exec();
 }
 
-// A refund/persist decision only needs a country's code and fetch status.
+// A ledger/persist decision only needs a country's code and fetch outcome.
 interface StatusResult {
   code: string;
   status?: string;
+  unanswered?: number; // attempts that got no reply (see fetchWithRetry)
 }
 
-// Per-provider count of fetches worth refunding: those whose status is
-// refundable (see REFUNDABLE_STATUSES - narrower than the retry set). Split by
-// tier since each provider owns its own ledger.
-export function refundCounts(results: readonly StatusResult[]): ProviderCounts {
+// How many credits one country's fetch may have cost: one for each attempt that
+// got no reply (both providers bill those), plus one if the final reply was
+// billed. A timeout or connection error means at least one unanswered attempt.
+export function creditsSpent(c: StatusResult): number {
+  const noReply = c.status === "timeout" || c.status === "network_error" ? 1 : 0;
+  const unanswered = Math.max(noReply, toInt(c.unanswered));
+  return unanswered + (isRefundableStatus(c.status) ? 0 : 1);
+}
+
+// Sum f over the countries, separately for each provider's ledger.
+function perProvider(results: readonly StatusResult[], f: (c: StatusResult) => number): ProviderCounts {
   let newsdata = 0, gnews = 0;
   for (const c of results || []) {
-    if (!isRefundableStatus(c.status)) continue;
-    if (HIGH_PRIORITY_CODES.has(c.code)) gnews++;
-    else newsdata++;
+    if (HIGH_PRIORITY_CODES.has(c.code)) gnews += f(c);
+    else newsdata += f(c);
   }
   return { newsdata, gnews };
+}
+
+// Countries whose fetch cost nothing and get their credit back.
+export function refundCounts(results: readonly StatusResult[]): ProviderCounts {
+  return perProvider(results, (c) => (creditsSpent(c) === 0 ? 1 : 0));
+}
+
+// Credits owed beyond the one reserved per country: retries after a request
+// that got no reply.
+export function extraCharges(results: readonly StatusResult[]): ProviderCounts {
+  return perProvider(results, (c) => Math.max(0, creditsSpent(c) - 1));
 }
 
 // Fetch outcomes worth retrying later the same day - a provider-side blip the
@@ -368,23 +378,18 @@ export function isTransientStatus(status: string | null | undefined): boolean {
   return m ? Number(m[1]) >= 500 : false;
 }
 
-// Which statuses get their reserved credit back. This is deliberately NARROWER
-// than TRANSIENT_STATUSES: a status is refundable only when the provider
-// probably did not serve (and therefore did not charge for) the request.
+// Final outcomes that aren't billed. Narrower than TRANSIENT_STATUSES: retrying
+// asks "might it work next time?", refunding asks "were we charged?".
 //
-//   network_error     no response at all                        -> refund
-//   rate_limited      429, rejected before any work             -> refund
-//   http_5xx          provider-side failure                     -> refund
-//   timeout           ambiguous; may have completed server-side  -> refund (see note)
-//                     (includes a request cut short by the tick budget)
-//   error             threw before/while requesting              -> refund
-//   deadline_skipped  tick ran out of time before requesting it  -> refund
-//   api_error         follows a 200 with a malformed body        -> NO refund
-//   invalid_json      follows a 200 with a malformed body        -> NO refund
+//   timeout, network_error  charged per attempt through `unanswered` instead
+//   rate_limited            429; free on GNews, assumed free on NewsData
+//   http_5xx                provider-side failure; assumed free
+//   error                   threw before or during the request; assumed free
+//   deadline_skipped        never sent
 //
-// `timeout` stays refundable because a request that never completed is genuinely
-// ambiguous, and over-refunding a timeout costs at most one credit of slack,
-// whereas a 200 we know was served should keep its charge.
+// Everything else costs a credit, including api_error and invalid_json (a 200
+// with a malformed body) and other 4xx. A NewsData 422 is actually free, so
+// `unsupported` overcounts by one, which is the safe side.
 const REFUNDABLE_STATUSES = new Set<string>([
   "timeout", "network_error", "rate_limited", "error", "deadline_skipped",
 ]);

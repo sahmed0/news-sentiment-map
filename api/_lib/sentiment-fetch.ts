@@ -247,10 +247,8 @@ export const HF_MAX_BACKOFF_MS = 30000; // cap a single HF wait (a cold-start es
 // ~60 s of api/cron/refresh.ts's 300 s maxDuration for persistence, the
 // aggregate rebuild and the tick record (all Redis round trips). Every request
 // timeout and retry wait is capped at the time remaining; nothing new starts
-// once it has run out. A request cut short by the cap is a plain timeout -
-// which is already refunded (see the status table in refresh-core.ts), because
-// a request that never completed may or may not have been charged - so the
-// budget introduces no new ledger case.
+// once it has run out. A request cut short by the cap is an ordinary timeout,
+// so the ledger charges it like any other (see creditsSpent in refresh-core.ts).
 export const TICK_BUDGET_MS = 240_000;
 
 // Time left before `deadlineAt`, or Infinity when there is no budget (the eval
@@ -349,12 +347,17 @@ interface FetchOutcome {
   status: string;
   latencyMs: number;
   attempts: number;
+  unanswered: number;
 }
 
+// `unanswered` counts attempts that got no reply (a timeout or a dropped
+// connection). The ledger charges each one, since the provider may still have
+// billed it (see creditsSpent in refresh-core.ts).
 interface RetryResult {
   res: Response | null;
   status: string | null;
   attempts: number;
+  unanswered: number;
 }
 
 // Shared retry loop for HTTP headline fetches. Handles two transient failure modes:
@@ -374,23 +377,25 @@ async function fetchWithRetry(
 ): Promise<RetryResult> {
   let res: Response;
   let attempts: number;
+  let unanswered = 0;
   for (let attempt = 0; ; attempt++) {
     attempts = attempt + 1;
     try {
       res = await fetch(url, { signal: timeoutSignal(requestTimeoutMs(deadlineAt)) });
     } catch (err) {
       if (!isRetryableNetworkError(err)) throw err;
+      unanswered++;
       const cause = errField(err, "cause");
       const errCode = (isRecord(cause) ? cause.code : undefined) ?? errField(err, "code") ?? errField(err, "name");
       const status = errField(err, "name") === "TimeoutError" ? "timeout" : "network_error";
       if (attempt >= maxRetries) {
         console.error(`[${tag}] ${code}: ${String(errCode)} - gave up after ${attempt} retries`);
-        return { res: null, status, attempts };
+        return { res: null, status, attempts, unanswered };
       }
       const wait = Math.max(minGapMs, backoffBaseMs * 2 ** attempt);
       if (remainingUntil(deadlineAt) <= wait) {
         console.error(`[${tag}] ${code}: ${String(errCode)} - tick budget spent, not retrying`);
-        return { res: null, status, attempts };
+        return { res: null, status, attempts, unanswered };
       }
       console.warn(`[${tag}] ${code}: ${String(errCode)} - retrying in ${wait}ms (attempt ${attempt + 1}/${maxRetries})`);
       await delay(wait);
@@ -399,18 +404,18 @@ async function fetchWithRetry(
     if (res.status !== 429) break;
     if (attempt >= maxRetries) {
       console.error(`[${tag}] ${code}: HTTP 429 - gave up after ${attempt} retries`);
-      return { res: null, status: "rate_limited", attempts };
+      return { res: null, status: "rate_limited", attempts, unanswered };
     }
     const retryAfter = parseRetryAfter(res.headers.get("retry-after"));
     const wait = Math.max(minGapMs, retryAfter ?? backoffBaseMs * 2 ** attempt);
     if (remainingUntil(deadlineAt) <= wait) {
       console.error(`[${tag}] ${code}: HTTP 429 - tick budget spent, not retrying`);
-      return { res: null, status: "rate_limited", attempts };
+      return { res: null, status: "rate_limited", attempts, unanswered };
     }
     console.warn(`[${tag}] ${code}: HTTP 429 - retrying in ${wait}ms (attempt ${attempt + 1}/${maxRetries})`);
     await delay(wait);
   }
-  return { res, status: null, attempts };
+  return { res, status: null, attempts, unanswered };
 }
 
 // The NewsData `latest` query for one country, without the API key.
@@ -432,12 +437,12 @@ async function fetchHeadlines(country: FetchTarget, deadlineAt?: number): Promis
   const { code: countryCode } = country;
   const url = `https://newsdata.io/api/1/latest?${newsDataQuery(country)}&apikey=${process.env.NEWSDATA_API_KEY}`;
   const start = now();
-  const { res, status: earlyStatus, attempts } = await fetchWithRetry(url, {
+  const { res, status: earlyStatus, attempts, unanswered } = await fetchWithRetry(url, {
     tag: "NewsData", code: countryCode,
     maxRetries: NEWSDATA_MAX_RETRIES, minGapMs: NEWSDATA_DELAY_MS, backoffBaseMs: NEWSDATA_BACKOFF_BASE_MS,
     deadlineAt,
   });
-  const out = (articles: RawArticle[], status: string): FetchOutcome => ({ articles, status, latencyMs: since(start), attempts });
+  const out = (articles: RawArticle[], status: string): FetchOutcome => ({ articles, status, latencyMs: since(start), attempts, unanswered });
 
   if (!res) return out([], earlyStatus ?? "network_error");
   if (!res.ok) {
@@ -508,12 +513,12 @@ async function fetchHeadlinesGNews(country: FetchTarget, deadlineAt?: number): P
   if (lang && ISO_TO_NEWSDATA_LANG[lang]) params.set("lang", lang);
   const url = `https://gnews.io/api/v4/top-headlines?${params}`;
   const start = now();
-  const { res, status: earlyStatus, attempts } = await fetchWithRetry(url, {
+  const { res, status: earlyStatus, attempts, unanswered } = await fetchWithRetry(url, {
     tag: "GNews", code,
     maxRetries: GNEWS_MAX_RETRIES, minGapMs: GNEWS_DELAY_MS, backoffBaseMs: GNEWS_BACKOFF_BASE_MS,
     deadlineAt,
   });
-  const out = (articles: RawArticle[], status: string): FetchOutcome => ({ articles, status, latencyMs: since(start), attempts });
+  const out = (articles: RawArticle[], status: string): FetchOutcome => ({ articles, status, latencyMs: since(start), attempts, unanswered });
 
   if (!res) return out([], earlyStatus ?? "network_error");
   if (!res.ok) {
@@ -817,6 +822,7 @@ interface Meta {
   status: string;
   ms: number;
   attempts: number;
+  unanswered: number;
 }
 
 // Optional per-run diagnostics filled in place for the cron's debug response.
@@ -902,18 +908,19 @@ export async function fetchCountries(
         // name, articles }; the status is read back out of `meta` in Phase 5's
         // merge step.
         // `continue`, not `break`: every input still gets exactly one output.
-        meta.set(code, { status: "deadline_skipped", ms: 0, attempts: 0 });
+        meta.set(code, { status: "deadline_skipped", ms: 0, attempts: 0, unanswered: 0 });
         results.push({ code, name, articles: [] });
         continue;
       }
       try {
-        const { articles, status, latencyMs, attempts } = await fetcher(countries[i], deadlineAt);
-        meta.set(code, { status, ms: latencyMs, attempts });
+        const { articles, status, latencyMs, attempts, unanswered } = await fetcher(countries[i], deadlineAt);
+        meta.set(code, { status, ms: latencyMs, attempts, unanswered });
         log(provider, code, { status, ms: latencyMs, art: articles.length, tries: attempts });
         results.push({ code, name, articles });
       } catch (err) {
         // One country's failure must never abort the remaining countries.
-        meta.set(code, { status: "error", ms: 0, attempts: 0 });
+        // Attempts before the throw go uncounted, so the ledger may undercount.
+        meta.set(code, { status: "error", ms: 0, attempts: 0, unanswered: 0 });
         console.error(`[fetchCountries] ${code} headlines:`, err);
         results.push({ code, name, articles: [] });
       }
@@ -1037,6 +1044,7 @@ export async function fetchCountries(
       name,
       score: avg,
       status: m?.status, // lets persistCountries distinguish transient vs terminal
+      unanswered: m?.unanswered ?? 0, // read by the credit ledger
       articles: enriched,
       fetchedAt: new Date().toISOString(),
     };
