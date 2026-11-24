@@ -52,19 +52,21 @@ describe("useCountryHistory", () => {
   });
 
   it("refetches once the cached series is older than the TTL", async () => {
-    vi.useFakeTimers();
+    // Fake only Date. The hook just reads Date.now() for its cache age, and
+    // Testing Library's waitFor needs real timers to avoid act() warnings.
+    vi.useFakeTimers({ toFake: ["Date"] });
     try {
       const fetchMock = vi.fn().mockResolvedValue(okBody(POINTS));
       vi.stubGlobal("fetch", fetchMock);
 
       const first = renderHook(() => useCountryHistory("it"));
-      await vi.waitFor(() => expect(first.result.current.loading).toBe(false));
+      await waitFor(() => expect(first.result.current.loading).toBe(false));
       first.unmount();
 
-      vi.advanceTimersByTime(5 * 60_000 + 1);
+      vi.setSystemTime(Date.now() + 5 * 60_000 + 1);
 
       const second = renderHook(() => useCountryHistory("it"));
-      await vi.waitFor(() => expect(second.result.current.loading).toBe(false));
+      await waitFor(() => expect(second.result.current.loading).toBe(false));
       expect(fetchMock).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();

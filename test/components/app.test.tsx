@@ -19,6 +19,13 @@ vi.mock("../../src/hooks/useWorldHistory.js", () => ({
   })),
 }));
 
+// Opening a country mounts the panel, which would fetch its history for real.
+// That fetch fails after the test finishes and triggers a React act() warning.
+// The panel's history section has its own tests in countryPanel.test.tsx.
+vi.mock("../../src/hooks/useCountryHistory.js", () => ({
+  useCountryHistory: vi.fn(() => ({ points: [], loading: false })),
+}));
+
 // The map is not what these assertions are about, and mounting it would parse
 // the bundled 110m topology and project ~180 features per test.
 vi.mock("../../src/components/WorldMap.js", () => ({
