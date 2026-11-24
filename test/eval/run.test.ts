@@ -23,6 +23,10 @@ import {
   type DriftResult,
 } from "../../eval/metrics.js";
 
+// The end-to-end cases run the whole pipeline, some of them twice. That takes
+// about 3s locally but passes 5s on GH CI runner with coverage on.
+vi.setConfig({ testTimeout: 30_000 });
+
 const readJson = <T>(dir: string, name: string): T => JSON.parse(readFileSync(join(dir, name), "utf8")) as T;
 
 // eval/out/ by name and mtime: proves a run left it byte-for-byte untouched.
