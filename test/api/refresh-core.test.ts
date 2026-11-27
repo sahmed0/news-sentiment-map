@@ -20,6 +20,8 @@ import {
   targetUtcHour,
   HISTORY_KEY,
   HISTORY_MAX_DAYS,
+  HEADLINES_KEY,
+  HEADLINES_TTL_S,
   recordTick,
   TICKS_KEY,
   TICKS_MAX,
@@ -514,12 +516,13 @@ describe("persistCountries history", () => {
     expect(parseHistoryPoint(JSON.stringify(point))).toEqual(point); // round-trips
   });
 
-  it("replaces the same day's point on a re-run instead of piling up", async () => {
+  it("replaces the same day's point and headlines on a re-run instead of piling up", async () => {
     const redis = createFakeRedis();
     const day = 500;
     await persistCountries(redis, [{ code: "us", score: 0.2, articles: [{ title: "a", score: 0.2 }] }], day);
     await persistCountries(redis, [{ code: "us", score: -0.4, articles: [{ title: "a", score: -0.4 }] }], day);
     expect(series(redis, "us")).toEqual([{ d: day, s: -0.4, n: 1, sd: 0 }]); // one member, latest wins
+    expect(redis._store.get(HEADLINES_KEY("us", day))).toMatchObject({ articles: [{ score: -0.4 }] });
   });
 
   it("caps the series at HISTORY_MAX_DAYS, dropping the oldest day", async () => {
@@ -553,6 +556,34 @@ describe("persistCountries history", () => {
     for (const code of ["gb", "de", "fr", "jp"]) {
       expect(redis._zsets.has(HISTORY_KEY(code))).toBe(false); // gaps are honest data
     }
+  });
+});
+
+describe("persistCountries headline archive", () => {
+  const articles = [
+    { title: "Hola", translatedTitle: "Hello", url: "https://e.x/1", publishedAt: "2026-11-20T08:00:00Z", language: "spanish", score: 0.4 },
+    { title: "Adios", translatedTitle: "Goodbye", url: "https://e.x/2", publishedAt: null, language: "spanish", score: null },
+  ];
+
+  it("stores a scored country's articles for the day with a 32-day expiry", async () => {
+    const redis = createFakeRedis();
+    await persistCountries(redis, [{ code: "us", score: 0.4, articles }], 500);
+    expect(redis._store.get(HEADLINES_KEY("us", 500))).toEqual({ d: 500, articles });
+    expect(redis._ttls.get(HEADLINES_KEY("us", 500))).toBe(HEADLINES_TTL_S);
+  });
+
+  it("writes nothing for retry or terminal countries", async () => {
+    const redis = createFakeRedis();
+    await persistCountries(
+      redis,
+      [
+        { code: "de", score: null, articles: [{ title: "x", score: null }] }, // scoring failed
+        { code: "fr", score: null, articles: [], status: "rate_limited" },    // transient
+        { code: "jp", score: null, articles: [], status: "empty" },           // terminal
+      ],
+      500
+    );
+    for (const code of ["de", "fr", "jp"]) expect(redis._store.has(HEADLINES_KEY(code, 500))).toBe(false);
   });
 });
 

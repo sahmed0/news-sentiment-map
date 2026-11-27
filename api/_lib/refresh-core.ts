@@ -12,6 +12,8 @@
 //   sentiment:history:<code>  -> ZSET, score = dayId, member = JSON {d,s,n}: one
 //                                point per country per scored day, capped at
 //                                HISTORY_MAX_DAYS (served by api/history.ts)
+//   sentiment:headlines:<code>:<dayId> -> JSON {d,articles}: one scored day's headlines,
+//                                EX HEADLINES_TTL_S (served by api/headlines.ts)
 //   sentiment:ticks           -> LIST of JSON TickSummary, newest first, capped at
 //                                TICKS_MAX: one entry per tick (served by api/health.ts)
 //   sentiment:scoring:down    -> ISO time the scorer was first seen down; present only
@@ -25,7 +27,7 @@
 import { COUNTRIES, HIGH_PRIORITY_CODES, LOW_PRIORITY_COUNTRIES } from "./sentiment-fetch.js";
 import { log } from "./logger.js";
 import { parseCountryResult, parseHistoryPoint, parseWorldHistory } from "../../shared/types.js";
-import type { CountryDef, CountryResult, ProviderCounts, RedisLike, Selection, StoredHistoryPoint, TickSummary, WorldHistory } from "../../shared/types.js";
+import type { Article, CountryDef, CountryResult, ProviderCounts, RedisLike, Selection, StoredHistoryPoint, TickSummary, WorldHistory } from "../../shared/types.js";
 import { headlineStats } from "../../shared/stats.js";
 
 export const AGG_KEY = "sentiment:world";
@@ -40,6 +42,12 @@ export const HISTORY_KEY = (code: string): string => `sentiment:history:${code}`
 // A year of daily points per country for trend analysis: small enough
 // (~40 bytes a point) that the ZSETs never grow unbounded.
 export const HISTORY_MAX_DAYS = 365;
+export const HEADLINES_KEY = (code: string, day: number): string => `sentiment:headlines:${code}:${day}`;
+// The 30-day scrubber window plus margin for the day boundary and the edge cache.
+export const HEADLINES_TTL_DAYS = 32;
+export const HEADLINES_TTL_S = HEADLINES_TTL_DAYS * 24 * 60 * 60;
+// Read every day whose key can still exist, so the scrubber still finds its oldest days if ticks stall.
+export const HEADLINES_READ_DAYS = HEADLINES_TTL_DAYS + 1;
 // Derived key: every country's last WORLD_HISTORY_WINDOW_DAYS daily scores in one
 // columnar blob, so the timeline scrubber is a single GET rather than 155. The
 // cron is the only writer (see refreshWorldHistory); one writer, many readers,
@@ -407,7 +415,7 @@ interface PersistResult {
   code: string;
   score: number | null;
   status?: string;
-  articles?: ReadonlyArray<{ title?: string | null; score?: number | null }>;
+  articles?: ReadonlyArray<Partial<Pick<Article, "title" | "translatedTitle" | "url" | "publishedAt" | "language" | "score">>>;
 }
 
 // Persist results. A country counts as refreshed only when it actually produced
@@ -456,6 +464,7 @@ export async function persistCountries(redis: RedisLike, results: readonly Persi
       p.zremrangebyscore(HISTORY_KEY(c.code), day, day);
       p.zadd(HISTORY_KEY(c.code), { score: day, member: JSON.stringify(point) });
       p.zremrangebyrank(HISTORY_KEY(c.code), 0, -(HISTORY_MAX_DAYS + 1));
+      p.set(HEADLINES_KEY(c.code, day), { d: day, articles }, { ex: HEADLINES_TTL_S });
       refreshed.push(c.code);
     } else if (scorable || isTransientStatus(c.status)) {
       // Leave untouched -> retried next tick. `scorable` = had headline text but

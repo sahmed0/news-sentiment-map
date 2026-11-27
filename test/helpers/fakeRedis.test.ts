@@ -136,3 +136,20 @@ describe("fakeRedis eval", () => {
     expect(redis._store.get(KEY)).toBe("mine");
   });
 });
+
+describe("fakeRedis TTLs", () => {
+  it("tracks TTLs like Redis: set ex and expire record them; a plain set and del clear them", async () => {
+    const redis = createFakeRedis();
+    await redis.set("a", "v", { ex: 60 });
+    await redis.set("b", "v");
+    await redis.expire("b", 30);
+    expect(redis._ttls.get("a")).toBe(60);
+    expect(redis._ttls.get("b")).toBe(30);
+    expect(await redis.get("a")).toBe("v"); // recorded, not enforced
+
+    await redis.set("a", "w");
+    await redis.del("b");
+    expect(redis._ttls.has("a")).toBe(false);
+    expect(redis._ttls.has("b")).toBe(false);
+  });
+});

@@ -11,8 +11,8 @@
 //     semantics in JS; it does not interpret Lua
 //   - pipeline() queues ops (including zrange, which the world-history rebuild
 //     pipelines one-per-country) and applies them on exec() in queue order
-// TTLs (ex / expire) are intentionally no-ops: tests inject `now`, they don't
-// wait for real expiry.
+// TTLs (ex / expire) are recorded in `_ttls`, not enforced: tests inject `now`,
+// they don't wait for real expiry.
 
 import type { RedisLike, RedisPipelineLike } from "../../shared/types.js";
 import { LOCK_RELEASE_LUA } from "../../api/_lib/lock.js";
@@ -24,6 +24,7 @@ export interface FakeRedis extends RedisLike {
   _sets: Map<string, Set<string>>;
   _zsets: Map<string, Map<string, number>>;
   _lists: Map<string, string[]>;
+  _ttls: Map<string, number>; // key -> seconds from the last ex / expire
 }
 
 interface Seed {
@@ -46,6 +47,7 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
   const sets = new Map<string, Set<string>>(); // key -> Set<string>
   const zsets = new Map<string, Map<string, number>>(); // key -> Map<member, score>
   const lists = new Map<string, string[]>(); // key -> head-first array
+  const ttls = new Map<string, number>(); // key -> seconds
 
   const api: FakeRedis = {
     async get(key) {
@@ -55,6 +57,9 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
       // nx: only set if absent (lock acquisition). Returns null on contention.
       if (opts.nx && store.has(key)) return null;
       store.set(key, value);
+      // A plain SET clears any TTL in Redis.
+      if (opts.ex !== undefined) ttls.set(key, opts.ex);
+      else ttls.delete(key);
       return "OK";
     },
     async del(...keys) {
@@ -64,6 +69,7 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
         sets.delete(k);
         zsets.delete(k);
         lists.delete(k);
+        ttls.delete(k);
       }
       return n;
     },
@@ -72,8 +78,9 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
       store.set(key, next);
       return next;
     },
-    async expire() {
-      return 1; // TTLs are no-ops in tests
+    async expire(key, seconds) {
+      ttls.set(key, seconds);
+      return 1;
     },
     async smembers(key) {
       const s = sets.get(key);
@@ -200,6 +207,7 @@ export function createFakeRedis(seed: Seed = {}): FakeRedis {
     _sets: sets,
     _zsets: zsets,
     _lists: lists,
+    _ttls: ttls,
   };
 
   for (const [k, v] of Object.entries(seed.store ?? {})) store.set(k, v);
