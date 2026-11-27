@@ -73,6 +73,35 @@ describe("useCountryHistory", () => {
     }
   });
 
+  it("does not get stuck loading when a cached country's entry expires on screen", async () => {
+    // Fake only Date: waitFor needs real timers to avoid act() warnings.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const fetchMock = vi.fn().mockResolvedValue(okBody(POINTS));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const { result, rerender } = renderHook(({ code }) => useCountryHistory(code), {
+        initialProps: { code: "ch" },
+      });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      rerender({ code: "jp" });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      // Back to the first country: the cache answers, so nothing is fetched.
+      rerender({ code: "ch" });
+      expect(result.current).toEqual({ points: POINTS, loading: false });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      vi.setSystemTime(Date.now() + 5 * 60_000 + 1);
+      rerender({ code: "ch" }); // any later re-render, e.g. a timeline step
+
+      // Keeping the points or refetching them would both satisfy this.
+      await waitFor(() => expect(result.current).toEqual({ points: POINTS, loading: false }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("aborts the in-flight request when the country changes", async () => {
     const signals: AbortSignal[] = [];
     const fetchMock = vi.fn((_url: string, init: { signal: AbortSignal }) => {

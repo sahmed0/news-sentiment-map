@@ -32,11 +32,18 @@ export function useCountryHistory(code: string | null): UseCountryHistory {
   // uppercase, so normalise once here rather than at every call site.
   const key = code ? code.toLowerCase() : null;
 
-  // The only state is the outcome of a completed request, tagged with the
+  // The only state is the last answer, fetched or cached, tagged with the
   // country it belongs to. Everything the caller sees is derived below, so
   // switching countries needs no state reset - a late response for the previous
   // country simply stops matching.
   const [result, setResult] = useState<{ key: string; points: HistoryPoint[] } | null>(null);
+
+  // Record cache hits too, or an entry expiring on screen leaves the panel
+  // loading with no fetch on the way.
+  const cached = key ? readCache(key) : null;
+  if (key && cached && (result?.key !== key || result.points !== cached)) {
+    setResult({ key, points: cached });
+  }
 
   useEffect(() => {
     // Nothing selected, or a warm cache entry already answers the question.
@@ -72,7 +79,6 @@ export function useCountryHistory(code: string | null): UseCountryHistory {
 
   // Cache first so a re-open paints on the first render. `result` then covers
   // the case where the entry expires while the panel is still open.
-  const cached = readCache(key);
   if (cached) return { points: cached, loading: false };
   if (result && result.key === key) return { points: result.points, loading: false };
   return { points: [], loading: true };
