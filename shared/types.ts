@@ -61,6 +61,17 @@ export interface HistoryResponse {
   points: HistoryPoint[];
 }
 
+// One day of GET /api/headlines.
+export interface HeadlineDay {
+  date: string; // "YYYY-MM-DD"
+  articles: Article[];
+}
+// Payload of GET /api/headlines: every stored day for one country, ascending.
+export interface HeadlinesResponse {
+  code: string;
+  days: HeadlineDay[];
+}
+
 // The bulk history payload (GET /api/world-history). Columnar rather than
 // per-point objects: 155 countries x 30 days is ~30 KB this way against ~210 KB
 // as objects, and the scrubber needs O(1) lookup per country per frame.
@@ -246,6 +257,44 @@ export function parseWorldHistory(v: unknown): WorldHistory | null {
     if (!arr.every((s) => s === null || Number.isFinite(s))) return null;
   }
   return { days: days as string[], scores: scores as Record<string, (number | null)[]> };
+}
+
+// One country-day of archived headlines, written by persistCountries, expiring
+// after HEADLINES_TTL_DAYS.
+export interface StoredHeadlineDay {
+  d: number; // day bucket (the NewsData-shifted dayId), also in the key
+  articles: Article[];
+}
+
+const strOrNull = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
+// Parse one stored headline day. Each article is rebuilt as a full Article, with
+// null for missing or wrong-typed fields; non-objects are dropped.
+export function parseStoredHeadlineDay(v: unknown): StoredHeadlineDay | null {
+  let parsed: unknown = v;
+  if (typeof v === "string") {
+    try {
+      parsed = JSON.parse(v);
+    } catch {
+      return null;
+    }
+  }
+  if (!isRecord(parsed)) return null;
+  const { d, articles } = parsed;
+  if (!Number.isFinite(d) || !Array.isArray(articles)) return null;
+  const out: Article[] = [];
+  for (const a of articles) {
+    if (!isRecord(a)) continue;
+    out.push({
+      title: strOrNull(a.title),
+      url: strOrNull(a.url),
+      publishedAt: strOrNull(a.publishedAt),
+      language: strOrNull(a.language),
+      translatedTitle: strOrNull(a.translatedTitle),
+      score: Number.isFinite(a.score) ? Number(a.score) : null,
+    });
+  }
+  return { d: Number(d), articles: out };
 }
 
 // Narrow one entry of the tick list into a TickSummary. The value arrives either
