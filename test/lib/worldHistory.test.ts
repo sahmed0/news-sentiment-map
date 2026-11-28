@@ -3,6 +3,7 @@ import {
   resolveSeries,
   resolveWorldHistory,
   scoresForDay,
+  sourceDayIndex,
   CARRY_FORWARD_MAX_DAYS,
 } from "../../src/lib/worldHistory.js";
 import type { WorldHistory } from "../../shared/types";
@@ -89,5 +90,28 @@ describe("scoresForDay", () => {
   it("returns a null for every country on an out-of-range index", () => {
     expect(scoresForDay(resolved, 9)).toEqual({ FR: null, US: null });
     expect(scoresForDay(resolved, -1)).toEqual({ FR: null, US: null });
+  });
+});
+
+describe("sourceDayIndex", () => {
+  // The panel takes the source date from here while the map takes the score from
+  // resolveSeries, so the two must agree everywhere or headlines and score diverge.
+  const SERIES: (number | null)[][] = [
+    [null, null, 0.2, null, 0.3], // leading nulls
+    [0.1, null, null, null, 0.5], // gap of exactly 3
+    [0.1, null, null, null, null, 0.6], // gap of 4
+    [null, null, null, null],
+    [0.1, null, -0.2, null, 0.3, null, 0], // alternating
+  ];
+  it.each([3, 1])("agrees with resolveSeries at every index (maxCarryDays %i)", (m) => {
+    for (const series of SERIES) {
+      const resolved = resolveSeries(series, m);
+      series.forEach((_, i) => {
+        const src = sourceDayIndex(series, i, m);
+        expect(resolved[i].carried).toBe(src !== null && src !== i);
+        expect(resolved[i].score === null).toBe(src === null);
+        if (src !== null) expect(resolved[i].score).toBe(series[src]);
+      });
+    }
   });
 });

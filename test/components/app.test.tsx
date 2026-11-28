@@ -25,6 +25,10 @@ vi.mock("../../src/hooks/useWorldHistory.js", () => ({
 vi.mock("../../src/hooks/useCountryHistory.js", () => ({
   useCountryHistory: vi.fn(() => ({ points: [], loading: false })),
 }));
+// Same reason: a past-day panel would fetch /api/headlines for real.
+vi.mock("../../src/hooks/useCountryHeadlines.js", () => ({
+  useCountryHeadlines: vi.fn(() => ({ status: "idle", byDate: new Map(), retry: () => {} })),
+}));
 
 // The map is not what these assertions are about, and mounting it would parse
 // the bundled 110m topology and project ~180 features per test.
@@ -388,6 +392,46 @@ describe("App country search", () => {
     expect(screen.queryByRole("combobox")).toBeNull();
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(screen.getByRole("combobox")).toBeTruthy();
+  });
+});
+
+describe("App on a past day", () => {
+  // us: measured on day index 10 (2026-08-11), nothing on 11-12, so day 12 is
+  // carried from day 10. Live score is +0.25; day 5 is -0.40.
+  const mockSeries = () => {
+    const d = days(20);
+    const us = d.map((_, i) => (i === 11 || i === 12 ? null : i === 5 ? -0.4 : 0.1));
+    const history: WorldHistory = { days: d, scores: { us } };
+    vi.mocked(useWorldHistory).mockReturnValue({
+      history,
+      resolved: resolveWorldHistory(history),
+      loading: false,
+      error: false,
+    });
+  };
+  const scrubTo = (i: number) => {
+    const slider = screen.getAllByRole("slider")[0];
+    fireEvent.change(slider, { target: { value: String(i) } });
+    fireEvent.keyUp(slider);
+  };
+  const search = (q: string) => {
+    fireEvent.click(screen.getByRole("button", { name: "Find a country" }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: q } });
+  };
+
+  it("hands the panel the source date on a carried day", () => {
+    mockHook({ data: [COUNTRY], byCode: { US: COUNTRY } });
+    mockSeries();
+    render(<App />);
+    scrubTo(12);
+    search("united states");
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+
+    expect(
+      screen.getByText(
+        "No headlines were scored for this country on 13 August 2026; showing its most recent earlier day, 11 August 2026.",
+      ),
+    ).toBeTruthy();
   });
 });
 

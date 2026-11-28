@@ -49,6 +49,20 @@ export function resolveSeries(
   return out;
 }
 
+// The index whose measured value resolveSeries shows at `dayIndex`, or null when
+// it shows nothing. Lets a carried day find the day its score (and headlines) came from.
+export function sourceDayIndex(
+  series: readonly (number | null)[],
+  dayIndex: number,
+  maxCarryDays: number = CARRY_FORWARD_MAX_DAYS,
+): number | null {
+  if (!Number.isInteger(dayIndex) || dayIndex < 0 || dayIndex >= series.length) return null;
+  for (let j = dayIndex; j >= 0 && dayIndex - j <= maxCarryDays; j--) {
+    if (typeof series[j] === "number") return j;
+  }
+  return null;
+}
+
 // Same, for every country. Keys are UPPERCASED here: the API serves lowercase
 // alpha-2 but the map indexes by uppercase (see byCode in useSentimentData).
 export function resolveWorldHistory(

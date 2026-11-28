@@ -1,5 +1,5 @@
 // src/components/CountryPanel.tsx
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { motion, AnimatePresence, useDragControls, useReducedMotion, type MotionProps, type PanInfo } from "framer-motion";
 import { sentimentBucket, bucketColor, bucketsWithinOneSE, BUCKET_COLOR } from "../lib/sentiment";
 import { safeHttpUrl } from "../lib/url";
@@ -9,6 +9,7 @@ import { computeDelta7d, formatShortDate, formatLongDate } from "../lib/history"
 import { edgeMotion, growMotion } from "../lib/motion";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { useCountryHistory } from "../hooks/useCountryHistory";
+import { useCountryHeadlines, type UseCountryHeadlines } from "../hooks/useCountryHeadlines";
 import { ExternalLink, X } from 'lucide-react';
 import { headlineStats } from "../../shared/stats";
 import type { Article, CountryResult, FilterKey, HistoryPoint } from "../../shared/types";
@@ -47,11 +48,24 @@ function ArticleScore({ score }: { score: number | null }) {
   );
 }
 
-// Headlines list with a sentiment filter. Lives under the key={country.code}
-// element, so its filter state resets automatically when the country changes.
-function Headlines({ articles }: { articles: Article[] }) {
-  const [filter, setFilter] = useState<FilterKey>("all");
-
+// Headlines list with a sentiment filter. CountryPanel owns the filter so it
+// survives stepping between days. Past days skip the entry animation, which
+// autoplay would otherwise replay every step.
+function Headlines({
+  articles,
+  label,
+  animate,
+  filter,
+  onFilterChange,
+  note,
+}: {
+  articles: Article[];
+  label: string;
+  animate: boolean;
+  filter: FilterKey;
+  onFilterChange: (f: FilterKey) => void;
+  note?: ReactNode;
+}) {
   const counts = articles.reduce<Record<FilterKey, number>>(
     (acc, a) => {
       const bucket = sentimentBucket(a.score);
@@ -69,10 +83,11 @@ function Headlines({ articles }: { articles: Article[] }) {
 
   return (
     <div className="flex-1 overflow-y-auto px-5 pb-5">
-      <p className="text-xs uppercase tracking-widest opacity-40 light:opacity-65 mb-2">Headlines</p>
+      {note}
+      <p className="text-xs uppercase tracking-widest opacity-40 light:opacity-65 mb-2">{label}</p>
 
       {/* Sentiment filter */}
-      <SentimentFilter value={filter} onChange={setFilter} counts={counts} className="mb-3" />
+      <SentimentFilter value={filter} onChange={onFilterChange} counts={counts} className="mb-3" />
 
       {visible.length ? (
         <ul className="space-y-5">
@@ -81,9 +96,9 @@ function Headlines({ articles }: { articles: Article[] }) {
             return (
             <motion.li
               key={article.url ?? i}
-              initial={{ opacity: 0, y: 8 }}
+              initial={animate ? { opacity: 0, y: 8 } : false}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.06 }}
+              transition={animate ? { delay: i * 0.06 } : undefined}
             >
               <div className="flex items-start gap-2">
                 {href ? (
@@ -358,14 +373,86 @@ function HistorySection({ points, loading }: { points: HistoryPoint[]; loading: 
   );
 }
 
+const NOTE = "text-sm text-fg/60 light:text-black/70 leading-snug";
+const CARRIED_NOTE = "text-xs text-fg/40 light:text-black/50 leading-snug mb-2";
+
+// The headlines area for a past day.
+function PastHeadlines({
+  countryName,
+  historical,
+  headlines,
+  filter,
+  onFilterChange,
+}: {
+  countryName: string;
+  historical: NonNullable<CountryPanelProps["historical"]>;
+  headlines: UseCountryHeadlines;
+  filter: FilterKey;
+  onFilterChange: (f: FilterKey) => void;
+}) {
+  const { date, carried, measuredOn } = historical;
+  const wrap = (children: ReactNode) => <div className="flex-1 overflow-y-auto px-5 pb-5">{children}</div>;
+
+  if (historical.score === null) {
+    return wrap(<p className={NOTE}>No headlines were scored for {countryName} on {formatLongDate(date)}.</p>);
+  }
+
+  const carriedNote = carried ? (
+    <p className={CARRIED_NOTE}>
+      {measuredOn
+        ? `No headlines were scored for this country on ${formatLongDate(date)}; showing its most recent earlier day, ${formatLongDate(measuredOn)}.`
+        : `No headlines were scored for this country on ${formatLongDate(date)}; showing its most recent earlier score.`}
+    </p>
+  ) : null;
+  const notSaved = (day: string) => (
+    <p className={NOTE}>Headlines from {formatLongDate(day)} weren't saved, so only the score is shown.</p>
+  );
+
+  if (carried && !measuredOn) return wrap(<>{carriedNote}{notSaved(date)}</>);
+  const shownDay = carried && measuredOn ? measuredOn : date;
+
+  if (headlines.status === "loading" || headlines.status === "idle") {
+    return wrap(<>{carriedNote}<p role="status" className={NOTE}>Loading headlines…</p></>);
+  }
+  if (headlines.status === "error") {
+    return wrap(
+      <>
+        {carriedNote}
+        <div role="status" className="flex items-center gap-3">
+          <p className={NOTE}>Couldn't load saved headlines.</p>
+          <button
+            type="button"
+            onClick={headlines.retry}
+            className="shrink-0 text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-1"
+            style={{ background: "rgb(var(--fg-rgb) / 0.08)", color: "rgb(var(--fg-rgb) / 0.8)" }}
+          >
+            Try again
+          </button>
+        </div>
+      </>
+    );
+  }
+  const articles = headlines.byDate.get(shownDay);
+  if (!articles) return wrap(<>{carriedNote}{notSaved(shownDay)}</>);
+  return (
+    <Headlines
+      articles={articles}
+      label={`Headlines · ${formatShortDate(shownDay)}`}
+      animate={false}
+      filter={filter}
+      onFilterChange={onFilterChange}
+      note={carriedNote}
+    />
+  );
+}
+
 interface CountryPanelProps {
   country: CountryResult | null;
   onClose: () => void;
-  // Set when the scrubber is on a past day: the sentiment bar shows this day's
-  // score and no headlines, since headlines are only kept for the current
-  // day. Undefined = normal behavior. `carried` marks a score that was filled
-  // forward from an earlier day rather than actually measured on this one.
-  historical?: { date: string; score: number | null; carried?: boolean };
+  // Set when the scrubber is on a past day: the panel shows that day's score and
+  // archived headlines. `carried` marks a score filled forward from an earlier
+  // day; `measuredOn` is that day, whose headlines are shown instead.
+  historical?: { date: string; score: number | null; carried?: boolean; measuredOn?: string };
 }
 
 export function CountryPanel({ country, onClose, historical }: CountryPanelProps) {
@@ -374,6 +461,17 @@ export function CountryPanel({ country, onClose, historical }: CountryPanelProps
   const reducedMotion = useReducedMotion();
   const edge = edgeMotion(!!reducedMotion, isMobile ? "y" : "x", "100%");
   const history = useCountryHistory(country?.code ?? null);
+  // Enabled on every past day, even scoreless ones, so autoplay passing through a scoreless day doesn't abort the fetch.
+  const headlines = useCountryHeadlines(country?.code ?? null, historical !== undefined);
+
+  // The filter persists across days and resets only when the country changes.
+  const code = country?.code ?? null;
+  const [filter, setFilter] = useState<FilterKey>("all");
+  const [filterCode, setFilterCode] = useState(code);
+  if (code !== filterCode) {
+    setFilterCode(code);
+    setFilter("all");
+  }
   const motionProps: MotionProps = isMobile
     ? {
         ...edge,
@@ -454,22 +552,22 @@ export function CountryPanel({ country, onClose, historical }: CountryPanelProps
               scored on enough days. */}
           <HistorySection points={history.points} loading={history.loading} />
 
-          {/* Headlines are only stored for the current day, so a past day shows
-          this note instead. */}
           {historical ? (
-            <div className="flex-1 overflow-y-auto px-5 pb-5">
-              <p className="text-sm text-fg/60 light:text-black/70 leading-snug">
-                We do not store headlines for past days, so only the score
-                recorded on {formatLongDate(historical.date)} is shown.
-              </p>
-              {historical.carried && (
-                <p className="text-xs text-fg/40 light:text-black/50 leading-snug mt-2">
-                  No headlines were scored for this country that day - showing its most recent earlier score.
-                </p>
-              )}
-            </div>
+            <PastHeadlines
+              countryName={country.name}
+              historical={historical}
+              headlines={headlines}
+              filter={filter}
+              onFilterChange={setFilter}
+            />
           ) : (
-            <Headlines articles={country.articles ?? []} />
+            <Headlines
+              articles={country.articles ?? []}
+              label="Headlines"
+              animate
+              filter={filter}
+              onFilterChange={setFilter}
+            />
           )}
         </motion.div>
       )}

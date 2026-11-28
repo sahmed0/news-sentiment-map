@@ -18,7 +18,7 @@ describe("InfoPanel", () => {
     const body = screen.getByText(/scrubs back through the last 30 days/);
     expect(body.textContent).toContain("every 2 days");
     expect(body.textContent).toContain("up to 3 days");
-    expect(body.textContent).toContain("only kept for the current day");
+    expect(body.textContent).toContain("Headlines are kept for 30 days");
   });
 
   it("describes the pipeline the code actually runs", () => {

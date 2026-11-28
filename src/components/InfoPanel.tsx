@@ -170,7 +170,7 @@ export function InfoPanel({ open, onClose }: InfoPanelProps) {
                 <br></br>
                 Not every country refreshes daily - low priority countries update roughly every 2 days - so a day with no fresh headlines carries the country's last known score forward for up to 3 days before it is shown as unscored again, rather than flickering gray on the map.
                 <br></br>
-                Headlines themselves are only kept for the current day, so scrubbing to a past day shows that day's recorded score without the headlines behind it.
+                Headlines are kept for 30 days, so a past day shows the headlines behind its score; a day from before headlines were saved shows its score alone.
               </p>
             </section>
             <section>

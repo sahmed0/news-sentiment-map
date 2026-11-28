@@ -14,7 +14,7 @@ import { TimeScrubber } from "./components/TimeScrubber";
 import { CountrySearch } from "./components/CountrySearch";
 import { sentimentBucket } from "./lib/sentiment";
 import { computeWorldSummary } from "./lib/summary";
-import { scoresForDay, MIN_HISTORY_DAYS } from "./lib/worldHistory";
+import { scoresForDay, sourceDayIndex, MIN_HISTORY_DAYS } from "./lib/worldHistory";
 import { useSentimentData } from "./hooks/useSentimentData";
 import { useWorldHistory } from "./hooks/useWorldHistory";
 import { useTheme } from "./hooks/useTheme";
@@ -111,6 +111,23 @@ export default function App() {
         : data.map((c) => ({ ...c, score: dayScores[c.code.toUpperCase()] ?? null })),
     [isLive, data, dayScores],
   );
+
+  // The panel's past-day view. A carried day also names its source day, taken
+  // from the same series as the score so the headlines match it.
+  let historical: { date: string; score: number | null; carried: boolean; measuredOn?: string } | undefined;
+  if (!isLive && selectedCountry) {
+    const upper = selectedCountry.code.toUpperCase();
+    const carried = resolved[upper]?.[activeDayIndex]?.carried ?? false;
+    const src = carried
+      ? sourceDayIndex(history.scores[selectedCountry.code.toLowerCase()] ?? [], activeDayIndex)
+      : null;
+    historical = {
+      date: history.days[activeDayIndex],
+      score: dayScores[upper] ?? null,
+      carried,
+      ...(src !== null && { measuredOn: history.days[src] }),
+    };
+  }
 
   // The world summary stat. Follows the scrubber onto past days.
   const worldSummary = useMemo(
@@ -391,15 +408,7 @@ export default function App() {
         <CountryPanel
           country={selectedCountry}
           onClose={() => setSelectedCountry(null)}
-          historical={
-            !isLive && selectedCountry
-              ? {
-                  date: history.days[activeDayIndex],
-                  score: dayScores[selectedCountry.code.toUpperCase()] ?? null,
-                  carried: resolved[selectedCountry.code.toUpperCase()]?.[activeDayIndex]?.carried ?? false,
-                }
-              : undefined
-          }
+          historical={historical}
         />
       </div>
 

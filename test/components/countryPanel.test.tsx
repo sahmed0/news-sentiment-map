@@ -3,13 +3,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Article, CountryResult, HistoryPoint } from "../../shared/types";
 
-// The panel's only new dependency is the history hook; mocking it is what lets
-// this file stand in for a browser check against real /api/history data.
+// Both data hooks are mocked: an unmocked fetch resolving after a test would
+// raise an act() warning, and mocking lets each state be set directly.
 vi.mock("../../src/hooks/useCountryHistory.js", () => ({
   useCountryHistory: vi.fn(() => ({ points: [], loading: false })),
 }));
+vi.mock("../../src/hooks/useCountryHeadlines.js", () => ({
+  useCountryHeadlines: vi.fn(),
+}));
 
 import { useCountryHistory } from "../../src/hooks/useCountryHistory.js";
+import { useCountryHeadlines, type UseCountryHeadlines } from "../../src/hooks/useCountryHeadlines.js";
 import { CountryPanel } from "../../src/components/CountryPanel.js";
 
 const COUNTRY: CountryResult = {
@@ -28,10 +32,19 @@ const series = (scores: number[]): HistoryPoint[] =>
 const mockHistory = (points: HistoryPoint[], loading = false) =>
   vi.mocked(useCountryHistory).mockReturnValue({ points, loading });
 
+// Returns the retry spy so a test can assert Try again calls it.
+const mockHeadlines = (status: UseCountryHeadlines["status"], byDate: Record<string, Article[]> = {}) => {
+  const retry = vi.fn();
+  vi.mocked(useCountryHeadlines).mockReturnValue({ status, byDate: new Map(Object.entries(byDate)), retry });
+  return retry;
+};
+
 // matchMedia (which the panel asks for to pick its layout) is stubbed globally
 // in test/setup.ts.
 beforeEach(() => {
   vi.mocked(useCountryHistory).mockReset();
+  vi.mocked(useCountryHeadlines).mockReset();
+  mockHeadlines("idle");
 });
 afterEach(cleanup);
 
@@ -100,64 +113,146 @@ describe("CountryPanel history section", () => {
 });
 
 describe("CountryPanel historical mode", () => {
-  it("replaces the headlines with a dated note and shows the day's score", () => {
+  const PAST = [
+    article({ title: "Archived good", url: "https://example.com/p1", score: 0.6 }),
+    article({ title: "Archived bad", url: "https://example.com/p2", score: -0.6 }),
+  ];
+  const TODAY = { ...COUNTRY, articles: [article({ title: "Today only", url: "https://example.com/t" })] };
+  const renderPast = (historical: NonNullable<Parameters<typeof CountryPanel>[0]["historical"]>, country = TODAY) => {
     mockHistory([]);
-    render(
-      <CountryPanel
-        country={{ ...COUNTRY, articles: [article({ title: "Today only" })] }}
-        onClose={() => {}}
-        historical={{ date: "2026-08-14", score: -0.42 }}
-      />,
-    );
+    return render(<CountryPanel country={country} onClose={() => {}} historical={historical} />);
+  };
+  const label = () => screen.getByText(/^Headlines/).textContent;
 
-    expect(
-      screen.getByText(/We do not store headlines for past days/).textContent,
-    ).toContain("score recorded on 14 August 2026 is shown.");
-    expect(screen.queryByText("Headlines")).toBeNull();
+  it("enables the archive only off the live day, including scoreless past days", () => {
+    mockHistory([]);
+    render(<CountryPanel country={TODAY} onClose={() => {}} />);
+    expect(label()).toBe("Headlines");
+    expect(screen.getByText("Today only")).toBeTruthy();
+    expect(vi.mocked(useCountryHeadlines)).toHaveBeenLastCalledWith("us", false);
+    cleanup();
+
+    renderPast({ date: "2026-08-14", score: null });
+    expect(vi.mocked(useCountryHeadlines)).toHaveBeenLastCalledWith("us", true);
+  });
+
+  it("says nothing was scored on a past day with no score, with no list", () => {
+    mockHeadlines("ready", { "2026-08-14": PAST });
+    renderPast({ date: "2026-08-14", score: null });
+
+    expect(screen.getByText("No headlines were scored for United States on 14 August 2026.")).toBeTruthy();
+    expect(screen.queryByText(/^Headlines/)).toBeNull();
+    expect(screen.queryByText("Archived good")).toBeNull();
+  });
+
+  it("shows a loading status while the archive is fetched, with the day's score", () => {
+    mockHeadlines("loading");
+    renderPast({ date: "2026-08-14", score: -0.42 });
+
+    expect(screen.getByRole("status").textContent).toBe("Loading headlines…");
     expect(screen.queryByText("Today only")).toBeNull();
-    // The sentiment bar reflects the historical score, not the country's current one.
     // U+2212, the panel's minus sign, not a hyphen.
     expect(screen.getByText(/Negative \(−0\.42/)).toBeTruthy();
   });
 
-  it("behaves exactly as before when `historical` is undefined", () => {
-    mockHistory([]);
-    render(<CountryPanel country={COUNTRY} onClose={() => {}} />);
+  it("offers Try again on a failed fetch, keeping the score and the carried note", () => {
+    const retry = mockHeadlines("error");
+    renderPast({ date: "2026-08-14", score: -0.42, carried: true, measuredOn: "2026-08-12" });
 
-    expect(screen.getByText("Headlines")).toBeTruthy();
-    expect(screen.queryByText(/We do not store headlines for past days/)).toBeNull();
+    const status = screen.getByRole("status");
+    expect(status.textContent).toContain("Couldn't load saved headlines.");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Negative \(−0\.42/)).toBeTruthy();
+    expect(screen.getByText(/showing its most recent earlier day, 12 August 2026\./)).toBeTruthy();
   });
 
-  it("adds a carried-day note when the shown score was filled rather than measured", () => {
+  it("lists the day's archived headlines under a dated label, with no carried note", () => {
+    mockHeadlines("ready", { "2026-08-14": PAST, "2026-08-13": [article({ title: "Wrong day" })] });
+    renderPast({ date: "2026-08-14", score: 0.1, carried: false });
+
+    expect(label()).toBe("Headlines · Aug 14");
+    expect(screen.getByText("Archived good")).toBeTruthy();
+    expect(screen.getByText("Archived bad")).toBeTruthy();
+    expect(screen.queryByText("Wrong day")).toBeNull();
+    expect(screen.queryByText("Today only")).toBeNull();
+    expect(screen.queryByText(/No headlines were scored for this country/)).toBeNull();
+  });
+
+  it("renders past-day items without the entry animation", () => {
+    mockHeadlines("ready", { "2026-08-14": PAST });
+    const past = renderPast({ date: "2026-08-14", score: 0.1 });
+    expect(past.container.querySelector("li")?.getAttribute("style") ?? "").not.toContain("opacity: 0");
+    cleanup();
+
     mockHistory([]);
-    render(
-      <CountryPanel
-        country={COUNTRY}
-        onClose={() => {}}
-        historical={{ date: "2026-08-14", score: -0.1, carried: true }}
-      />,
-    );
+    const live = render(<CountryPanel country={TODAY} onClose={() => {}} />);
+    expect(live.container.querySelector("li")?.getAttribute("style")).toContain("opacity: 0");
+  });
+
+  it("shows a carried day's source-day headlines under the source date", () => {
+    mockHeadlines("ready", { "2026-08-12": PAST, "2026-08-14": [article({ title: "Wrong day" })] });
+    renderPast({ date: "2026-08-14", score: 0.1, carried: true, measuredOn: "2026-08-12" });
 
     expect(
       screen.getByText(
-        "No headlines were scored for this country that day - showing its most recent earlier score.",
+        "No headlines were scored for this country on 14 August 2026; showing its most recent earlier day, 12 August 2026.",
       ),
     ).toBeTruthy();
+    expect(label()).toBe("Headlines · Aug 12");
+    expect(screen.getByText("Archived good")).toBeTruthy();
+    expect(screen.queryByText("Wrong day")).toBeNull();
   });
 
-  it("omits the carried-day note when the day's score was actually measured", () => {
-    mockHistory([]);
-    render(
-      <CountryPanel
-        country={COUNTRY}
-        onClose={() => {}}
-        historical={{ date: "2026-08-14", score: -0.1, carried: false }}
-      />,
-    );
+  it("says the source day wasn't saved when a carried day's source has no archive", () => {
+    mockHeadlines("ready", {});
+    renderPast({ date: "2026-08-14", score: 0.1, carried: true, measuredOn: "2026-08-12" });
+
+    expect(screen.getByText(/showing its most recent earlier day, 12 August 2026\./)).toBeTruthy();
+    expect(screen.getByText("Headlines from 12 August 2026 weren't saved, so only the score is shown.")).toBeTruthy();
+  });
+
+  it("falls back to the short carried note and the day's own message without a source date", () => {
+    mockHeadlines("ready", { "2026-08-14": PAST });
+    renderPast({ date: "2026-08-14", score: 0.1, carried: true });
 
     expect(
-      screen.queryByText(/No headlines were scored for this country that day/),
-    ).toBeNull();
+      screen.getByText(
+        "No headlines were scored for this country on 14 August 2026; showing its most recent earlier score.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Headlines from 14 August 2026 weren't saved, so only the score is shown.")).toBeTruthy();
+    expect(screen.queryByText("Archived good")).toBeNull();
+  });
+
+  it("keeps the filter across days and resets it on a new country", () => {
+    const filter = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}`) });
+    mockHeadlines("ready", {
+      "2026-08-14": PAST,
+      "2026-08-15": [article({ title: "Next good", score: 0.7 }), article({ title: "Next bad", score: -0.7 })],
+    });
+    mockHistory([]);
+    const { rerender } = render(
+      <CountryPanel country={TODAY} onClose={() => {}} historical={{ date: "2026-08-14", score: 0.1 }} />,
+    );
+    fireEvent.click(filter("Negative"));
+    expect(screen.queryByText("Archived good")).toBeNull();
+
+    rerender(<CountryPanel country={TODAY} onClose={() => {}} historical={{ date: "2026-08-15", score: 0.1 }} />);
+    expect(screen.getByText("Next bad")).toBeTruthy();
+    expect(screen.queryByText("Next good")).toBeNull();
+
+    rerender(
+      <CountryPanel
+        country={{ ...TODAY, code: "fr", name: "France" }}
+        onClose={() => {}}
+        historical={{ date: "2026-08-15", score: 0.1 }}
+      />,
+    );
+    // The old panel is still exiting with its Negative filter, so only the new
+    // one can be showing "Next good".
+    expect(screen.getByText("Next good")).toBeTruthy();
+    expect(screen.getAllByText("Next bad")).toHaveLength(2);
   });
 });
 
@@ -307,7 +402,7 @@ describe("CountryPanel uncertainty", () => {
     screen.getByTitle("Mean of this country's headline scores, from −1 to +1").textContent;
   const caveat = () => screen.queryByText(/Not distinguishable from/);
   const notRecorded = () => screen.queryByText(/Spread was not recorded/);
-  const CARRIED = "No headlines were scored for this country that day - showing its most recent earlier score.";
+  const CARRIED = "No headlines were scored for this country on 22 September 2026; showing its most recent earlier score.";
 
   it("shows the interval and the headline count for a live day with 5 headlines", () => {
     // mean 0.40, sd 0.158, se 0.071
